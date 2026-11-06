@@ -1,0 +1,25 @@
+[package]
+name = "egui-screencast"
+description = "Tutorials played and recorded by an egui app itself: a plan of clicks, keys and the app's own actions, a hand-like pointer, pictures and a video's frames, with or without a window"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cadscribe/egui-screencast"
+
+# Same rules as OpenSolve, OpenCAD and OpenSketch: every external
+# dependency is pinned exactly (`=x.y.z`) and was published at least 7 days
+# before it was added. The app's eframe adds its own features to these.
+[dependencies]
+eframe = { version = "=0.37.0", default-features = false, features = ["wgpu"] }
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+float_cmp = "warn"
