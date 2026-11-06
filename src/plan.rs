@@ -1,6 +1,8 @@
 //! A plan and what its steps do.
 
-use eframe::egui;
+use std::path::PathBuf;
+
+use eframe::egui::{self, Color32};
 use serde_json::Value;
 
 /// What the pointer goes to.
@@ -39,6 +41,23 @@ pub enum Action {
     App(Value),
 }
 
+/// A card over the whole window while its step plays: an intro with what
+/// the tutorial shows, an ending with the logo and where to find more.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Card {
+    pub title: String,
+    pub subtitle: Option<String>,
+    /// Points, each a line with a dot.
+    pub points: Vec<String>,
+    /// A picture above the title (PNG).
+    pub logo: Option<PathBuf>,
+    /// A line at the bottom, as an address ("github.com/…").
+    pub link: Option<String>,
+    pub background: Color32,
+    /// The dots and the link.
+    pub accent: Color32,
+}
+
 /// A step of the plan.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Step {
@@ -48,6 +67,7 @@ pub struct Step {
     pub shot: Option<String>,
     /// Seconds of video at least: its narration.
     pub seconds: f64,
+    pub card: Option<Card>,
 }
 
 /// The parsed plan.
@@ -72,6 +92,39 @@ fn parse_target(v: &Value) -> Result<Target, String> {
     Ok(match at {
         Some(p) => Target::At([p[0] as f32, p[1] as f32]),
         None => Target::App(v.clone()),
+    })
+}
+
+/// `#rrggbb`.
+fn parse_colour(v: &Value) -> Option<Color32> {
+    let h = v.as_str()?.strip_prefix('#')?;
+    let n = u32::from_str_radix(h, 16).ok().filter(|_| h.len() == 6)?;
+    Some(Color32::from_rgb((n >> 16) as u8, (n >> 8) as u8, n as u8))
+}
+
+fn parse_card(v: &Value) -> Result<Card, String> {
+    let text = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_owned);
+    Ok(Card {
+        title: text("title").ok_or_else(|| format!("a card has a title: {v}"))?,
+        subtitle: text("subtitle"),
+        points: v
+            .get("points")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        logo: text("logo").map(PathBuf::from),
+        link: text("link"),
+        background: v
+            .get("background")
+            .and_then(parse_colour)
+            .unwrap_or(Color32::from_rgb(24, 28, 36)),
+        accent: v
+            .get("accent")
+            .and_then(parse_colour)
+            .unwrap_or(Color32::from_rgb(59, 130, 246)),
     })
 }
 
@@ -145,6 +198,10 @@ pub fn parse_plan(text: &str) -> Result<Plan, String> {
             actions,
             shot: s["shot"].as_str().map(str::to_owned),
             seconds: s["seconds"].as_f64().unwrap_or(0.0),
+            card: match s.get("card") {
+                Some(c) => Some(parse_card(c).map_err(|e| format!("step {}: {e}", i + 1))?),
+                None => None,
+            },
         });
     }
     if steps.is_empty() {
@@ -235,8 +292,24 @@ mod tests {
             &s.actions[3],
             Action::Click { target: Target::App(v), hover: true, .. } if v["model"][2] == 2
         ));
+        assert_eq!(s.card, None);
         assert!(parse_plan(r#"{"steps": [{"actions": [{"key": "Nope"}]}]}"#).is_err());
         assert!(parse_plan(r#"{"steps": []}"#).is_err());
+    }
+
+    #[test]
+    fn a_step_can_show_a_card() {
+        let plan = parse_plan(
+            r##"{"steps": [{"card": {"title": "A tray", "points": ["Sketch", "Offset"],
+                "link": "github.com/x/y", "background": "#0e4a45"}}]}"##,
+        )
+        .unwrap();
+        let card = plan.steps[0].card.as_ref().unwrap();
+        assert_eq!(card.title, "A tray");
+        assert_eq!(card.points, ["Sketch", "Offset"]);
+        assert_eq!(card.link.as_deref(), Some("github.com/x/y"));
+        assert_eq!(card.background, Color32::from_rgb(0x0e, 0x4a, 0x45));
+        assert!(parse_plan(r#"{"steps": [{"card": {"points": []}}]}"#).is_err());
     }
 
     #[test]

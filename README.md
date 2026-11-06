@@ -34,6 +34,24 @@ run the app by `headless::run`, its paint callbacks set up by the function
 passed (as `wgpu_render_state` would offer them). OpenSolve's
 `crates/opensolve-app/src/record.rs` is a whole example.
 
+## Cards
+
+A step can show a card over the whole window while it plays: an intro with
+what the tutorial shows, an ending with a logo and a link. It comes in over
+the app and goes at the end of the step's narration; on the first step the
+video opens on it, on the last it ends on it.
+
+```yaml
+card:
+  title: A 3D-printed tray
+  subtitle: in OpenSolve
+  points: [Parameters for its sizes, An offset for the wall]
+  logo: assets/icon/app-512.png      # PNG, from the folder the runner is run in
+  link: github.com/you/app
+  background: "#0e4a45"
+  accent: "#f28c28"
+```
+
 ## The runner
 
 `scripts/tutorial.py` builds `<tutorials>/<name>/script.yaml` into the

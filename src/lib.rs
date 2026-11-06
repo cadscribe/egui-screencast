@@ -31,5 +31,5 @@ mod player;
 mod writer;
 
 pub use hand::hand_path;
-pub use plan::{Action, Plan, Step, Target, parse_plan, substitute};
+pub use plan::{Action, Card, Plan, Step, Target, parse_plan, substitute};
 pub use player::{Player, Stage};

@@ -1,6 +1,6 @@
 //! The player: a plan carried out frame by frame, the app's pictures taken.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -8,7 +8,7 @@ use eframe::egui::{self, Color32, Pos2, Rect, Stroke, pos2};
 use serde_json::{Value, json};
 
 use crate::hand::hand_path;
-use crate::plan::{Action, Plan, Target, parse_plan};
+use crate::plan::{Action, Card, Plan, Target, parse_plan};
 use crate::writer::{Frames, Job, Writer};
 
 /// Frames before the first step: fonts, layout and the first build.
@@ -23,6 +23,8 @@ const ZOOM: f64 = 0.6;
 const SHOWN: f64 = 3.0;
 /// Seconds an action may take before the play gives up.
 const PATIENCE: f64 = 60.0;
+/// Seconds a card takes to show and to go.
+const FADE: f64 = 0.4;
 
 /// What the player needs of the app.
 pub trait Stage {
@@ -124,6 +126,8 @@ pub struct Player {
     writer: Writer,
     log: Vec<Logged>,
     error: Option<String>,
+    /// The cards' logos, loaded once (none: it could not be read).
+    logos: HashMap<PathBuf, Option<egui::TextureHandle>>,
 }
 
 impl std::fmt::Debug for Player {
@@ -177,6 +181,7 @@ impl Player {
             writer: Writer::new(),
             log: Vec::new(),
             error: None,
+            logos: HashMap::new(),
         })
     }
 
@@ -496,6 +501,64 @@ impl Player {
         ));
     }
 
+    /// How much the step's card shows now, 0 to 1: it comes in over the
+    /// app (at once on the first step, so the video opens on it) and goes
+    /// at the end of its narration (not on the last step, so the video ends
+    /// on it).
+    fn card_shown(&self) -> f32 {
+        let fade = self.frames_of(FADE).max(1) as f32;
+        let elapsed = (self.video_frames - self.step_start) as f32;
+        let first = self.step == 0;
+        let last = self.step + 1 == self.plan.steps.len();
+        let come = if first { 1.0 } else { elapsed / fade };
+        let go = match self.phase {
+            Phase::Hold if !last => {
+                let want = self.frames_of(self.plan.steps[self.step].seconds) as f32;
+                (want - elapsed) / fade
+            }
+            _ => 1.0,
+        };
+        come.min(go).clamp(0.0, 1.0)
+    }
+
+    fn logo(&mut self, ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+        self.logos
+            .entry(path.to_path_buf())
+            .or_insert_with(|| {
+                let img = image::open(path)
+                    .map_err(|e| eprintln!("play: {}: {e}", path.display()))
+                    .ok()?
+                    .to_rgba8();
+                let size = [img.width() as usize, img.height() as usize];
+                let image = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+                Some(ctx.load_texture(
+                    format!("screencast_logo {}", path.display()),
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ))
+            })
+            .clone()
+    }
+
+    /// The step's card over the whole window, if it has one; how much it
+    /// shows.
+    fn paint_card(&mut self, ctx: &egui::Context) -> f32 {
+        let Some(card) = self.plan.steps.get(self.step).and_then(|s| s.card.clone()) else {
+            return 0.0;
+        };
+        let k = self.card_shown();
+        if k <= 0.0 {
+            return 0.0;
+        }
+        let logo = card.logo.as_ref().and_then(|p| self.logo(ctx, p));
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Tooltip,
+            egui::Id::unique("screencast_card"),
+        ));
+        paint_card(&painter, ctx.content_rect(), &card, logo.as_ref(), k);
+        k
+    }
+
     /// Asks for this frame's picture: a frame of the video, or `shot`.
     fn capture(&mut self, ctx: &egui::Context, shot: Option<String>) {
         let frames = self.frames.clone();
@@ -669,7 +732,10 @@ impl Player {
         if self.error.is_some() {
             return false;
         }
-        self.paint_pointer(ctx);
+        let shown = self.paint_card(ctx);
+        if shown < 1.0 {
+            self.paint_pointer(ctx);
+        }
         if self.plan.video {
             self.capture(ctx, None);
             self.video_frames += 1;
@@ -699,5 +765,111 @@ impl Player {
                 until: self.clock + self.frames_of(SETTLE),
             };
         }
+    }
+}
+
+/// A card in `screen`, `k` of it shown: its logo, title and subtitle, its
+/// points with the accent's dots, its link. With points it reads from the
+/// left, without (an ending) it is centred.
+fn paint_card(
+    painter: &egui::Painter,
+    screen: Rect,
+    card: &Card,
+    logo: Option<&egui::TextureHandle>,
+    k: f32,
+) {
+    painter.rect_filled(screen, 0.0, card.background.gamma_multiply(k));
+    let white = Color32::WHITE.gamma_multiply(k);
+    let soft = Color32::from_white_alpha(200).gamma_multiply(k);
+    let accent = card.accent.gamma_multiply(k);
+    let width = (screen.width() - 160.0).min(780.0);
+    let centred = card.points.is_empty();
+    let layout = |text: &str, size: f32, colour: Color32, wrap: f32| {
+        let mut job = egui::text::LayoutJob::simple(
+            text.to_owned(),
+            egui::FontId::proportional(size),
+            colour,
+            wrap,
+        );
+        if centred {
+            job.halign = egui::Align::Center;
+        }
+        painter.layout_job(job)
+    };
+    let title = layout(&card.title, 40.0, white, width);
+    let subtitle = card
+        .subtitle
+        .as_deref()
+        .map(|t| layout(t, 22.0, soft, width));
+    let points: Vec<_> = card
+        .points
+        .iter()
+        .map(|p| layout(p, 22.0, white, width - 32.0))
+        .collect();
+    let link = card.link.as_deref().map(|t| layout(t, 20.0, accent, width));
+    let logo_size = if centred { 160.0 } else { 88.0 };
+    // The whole height, to centre it.
+    let mut height = title.size().y;
+    if logo.is_some() {
+        height += logo_size + 28.0;
+    }
+    if let Some(g) = &subtitle {
+        height += 12.0 + g.size().y;
+    }
+    if !points.is_empty() {
+        height += 36.0 + points.iter().map(|g| g.size().y + 14.0).sum::<f32>() - 14.0;
+    }
+    if let Some(g) = &link {
+        height += 44.0 + g.size().y;
+    }
+    let left = screen.center().x - width / 2.0;
+    // Where a galley's left goes: centred galleys are laid out about their
+    // own centre.
+    let x = |g: &egui::Galley| {
+        if centred {
+            screen.center().x - g.size().x / 2.0 - g.rect.left()
+        } else {
+            left
+        }
+    };
+    let mut y = screen.center().y - height / 2.0;
+    if let Some(t) = logo {
+        let lx = if centred {
+            screen.center().x - logo_size / 2.0
+        } else {
+            left
+        };
+        let r = Rect::from_min_size(pos2(lx, y), egui::vec2(logo_size, logo_size));
+        painter.image(
+            t.id(),
+            r,
+            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+            Color32::WHITE.gamma_multiply(k),
+        );
+        y += logo_size + 28.0;
+    }
+    let h = title.size().y;
+    painter.galley(pos2(x(&title), y), title.clone(), white);
+    y += h;
+    if let Some(g) = subtitle {
+        y += 12.0;
+        let h = g.size().y;
+        painter.galley(pos2(x(&g), y), g, soft);
+        y += h;
+    }
+    if !points.is_empty() {
+        y += 36.0;
+        for g in points {
+            let row = g.rows.first().map_or(g.size().y, |r| r.rect().height());
+            painter.circle_filled(pos2(left + 8.0, y + row / 2.0), 6.0, accent);
+            let h = g.size().y;
+            painter.galley(pos2(left + 32.0, y), g, white);
+            y += h + 14.0;
+        }
+        y -= 14.0;
+    }
+    if let Some(g) = link {
+        y += 44.0;
+        painter.galley(pos2(x(&g), y), g, accent);
     }
 }

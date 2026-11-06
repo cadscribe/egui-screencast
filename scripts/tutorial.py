@@ -153,6 +153,11 @@ def plan(name: str, script: dict, audio, video: bool) -> dict:
                 "seconds": round(audio[i][1] + PAUSE, 3),
             }
         )
+        if step.get("card"):
+            card = dict(step["card"])
+            if card.get("logo"):
+                card["logo"] = str((ROOT / card["logo"]).resolve())
+            steps[-1]["card"] = card
     return {"fps": FPS, "video": video, "shot_width": SHOT_WIDTH, "steps": steps}
 
 
