@@ -56,21 +56,59 @@ def key(text: str, voice: str, speed: float) -> str:
     return h.hexdigest()[:16]
 
 
+def words_file(wav: Path) -> Path:
+    """Where the words of a narration and their times are kept."""
+    return wav.with_suffix(".words.json")
+
+
 def speak(text: str, out: Path, voice: str = VOICE, speed: float = 1.0) -> float:
-    """Writes `text` spoken as a 24 kHz mono WAV to `out`; its seconds."""
+    """Writes `text` spoken as a 24 kHz mono WAV to `out`; its seconds.
+
+    Beside it, `words_file(out)`: each word (and mark) as Kokoro read it,
+    with when it starts and ends in seconds and whether a space follows,
+    so that actions can wait for a word and subtitles show what is said
+    when it is said."""
+    import json
+
     import numpy as np
     import soundfile as sf
 
     pipeline = _load()
-    chunks = [
-        r.audio.numpy()
-        for r in pipeline(text, voice=voice_file(voice), speed=speed)
-        if r.audio is not None
-    ]
+    chunks = []
+    words = []
+    at = 0.0
+    for r in pipeline(text, voice=voice_file(voice), speed=speed):
+        if r.audio is None:
+            continue
+        audio = r.audio.numpy()
+        for t in r.tokens or []:
+            if t.start_ts is None or t.end_ts is None:
+                continue
+            words.append(
+                {
+                    "text": t.text,
+                    "start": round(at + t.start_ts, 3),
+                    "end": round(at + t.end_ts, 3),
+                    "space": bool(t.whitespace),
+                }
+            )
+        chunks.append(audio)
+        at += len(audio) / RATE
     audio = np.concatenate(chunks) if chunks else np.zeros(RATE // 2, dtype=np.float32)
     out.parent.mkdir(parents=True, exist_ok=True)
     sf.write(out, audio, RATE, subtype="PCM_16")
+    words_file(out).write_text(json.dumps(words), encoding="utf-8")
     return len(audio) / RATE
+
+
+def words(wav: Path) -> list[dict] | None:
+    """The words of a narration spoken before, if they were kept."""
+    import json
+
+    path = words_file(wav)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def phonemes(text: str, voice: str = VOICE) -> str:

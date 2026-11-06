@@ -31,6 +31,14 @@ pub enum Action {
     /// Text typed into what has the keys, replacing what it holds.
     Type(String),
     Wait(f64),
+    /// Until the step's narration has come to a point, seconds after the
+    /// step began (`{"cue": 3.2}`): what follows is done as it is said. The
+    /// runner makes it from the words (`cue: "Open it"`). Should the actions
+    /// before it have taken longer, the rest of the narration waits instead.
+    Cue(f64),
+    /// The step's picture taken here, not at the step's end
+    /// (`{"shot": true}`): the moment that shows what its text says.
+    Shot,
     /// The view under `at` zoomed by `factor`, as by a pinch there.
     Zoom {
         factor: f32,
@@ -77,6 +85,9 @@ pub struct Plan {
     pub video: bool,
     pub shot_width: u32,
     pub steps: Vec<Step>,
+    /// A line shown over the whole video, in a corner, and on its cards:
+    /// that the voice is synthetic ("Voice: AI-generated (Kokoro)").
+    pub caption: Option<String>,
 }
 
 fn parse_target(v: &Value) -> Result<Target, String> {
@@ -171,11 +182,21 @@ fn parse_action(v: &Value) -> Result<Action, String> {
     if let Some(s) = o.get("wait").and_then(Value::as_f64) {
         return Ok(Action::Wait(s));
     }
+    if let Some(c) = o.get("cue") {
+        return c
+            .as_f64()
+            .filter(|s| *s >= 0.0)
+            .map(Action::Cue)
+            .ok_or_else(|| format!("a cue is seconds into the narration (the runner's): {v}"));
+    }
+    if o.get("shot").and_then(Value::as_bool) == Some(true) {
+        return Ok(Action::Shot);
+    }
     Ok(Action::App(v.clone()))
 }
 
-/// A plan from its JSON: `fps`, `video`, `shot_width` and `steps`, each
-/// with `name`, `actions`, `shot` and `seconds`.
+/// A plan from its JSON: `fps`, `video`, `shot_width`, `caption` and
+/// `steps`, each with `name`, `actions`, `shot`, `seconds` and `card`.
 ///
 /// # Errors
 ///
@@ -212,6 +233,11 @@ pub fn parse_plan(text: &str) -> Result<Plan, String> {
         video: v["video"].as_bool().unwrap_or(true),
         shot_width: v["shot_width"].as_u64().unwrap_or(1600) as u32,
         steps,
+        caption: v["caption"]
+            .as_str()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_owned),
     })
 }
 
@@ -310,6 +336,32 @@ mod tests {
         assert_eq!(card.link.as_deref(), Some("github.com/x/y"));
         assert_eq!(card.background, Color32::from_rgb(0x0e, 0x4a, 0x45));
         assert!(parse_plan(r#"{"steps": [{"card": {"points": []}}]}"#).is_err());
+    }
+
+    #[test]
+    fn cues_pictures_and_the_caption() {
+        let plan = parse_plan(
+            r#"{"caption": "Voice: AI-generated (Kokoro)", "steps": [{"seconds": 6,
+                "actions": [{"cue": 2.5, "words": "Open it"}, {"click": {"at": [1, 2]}},
+                            {"shot": true}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            plan.caption.as_deref(),
+            Some("Voice: AI-generated (Kokoro)")
+        );
+        let a = &plan.steps[0].actions;
+        assert_eq!(a[0], Action::Cue(2.5));
+        assert_eq!(a[2], Action::Shot);
+        // Words are the runner's to turn into seconds.
+        assert!(parse_plan(r#"{"steps": [{"actions": [{"cue": "Open it"}]}]}"#).is_err());
+        assert!(parse_plan(r#"{"steps": [{"actions": [{"cue": -1}]}]}"#).is_err());
+        assert_eq!(
+            parse_plan(r#"{"caption": " ", "steps": [{}]}"#)
+                .unwrap()
+                .caption,
+            None
+        );
     }
 
     #[test]

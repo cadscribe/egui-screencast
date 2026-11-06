@@ -39,7 +39,10 @@ passed (as `wgpu_render_state` would offer them). OpenSolve's
 A step can show a card over the whole window while it plays: an intro with
 what the tutorial shows, an ending with a logo and a link. It comes in over
 the app and goes at the end of the step's narration; on the first step the
-video opens on it, on the last it ends on it.
+video opens on it, on the last it ends on it. Its parts come in one after
+the other, each fading in and moving a little into place: the logo, the
+title, the subtitle, a rule in the accent's colour, the points one by one,
+the link.
 
 ```yaml
 card:
@@ -62,3 +65,42 @@ plan, speaks the narration with Kokoro (`scripts/narrate.py`, pinned in
     python scripts/tutorial.py --app target/release/app \
         [--app-arg ARG]… [--env K=V]… [--tutorials docs/tutorials] \
         [--no-voice] [--no-video] [--window] [NAME…]
+
+## What is said with what is seen
+
+A step's narration starts with the step, and its actions run as fast as
+they can; left so, a click comes before the sentence that asks for it. A
+cue ties them together:
+
+```yaml
+say: The switcher says what you work on. Open it. It lists the parts.
+actions:
+  - cue: Open it            # waits until the narration says these words
+  - click: {spot: Switcher}
+  - cue: It lists
+  - shot: true              # the step's picture here, not at its end
+```
+
+The runner finds the words in Kokoro's times of each word it spoke and
+makes the cue the seconds into the step when they are said; the player
+waits for that moment. Should the actions before a cue take longer than
+the words before it, the words from the cue on wait instead (the cue's
+frame is in `timeline.json`, and the runner puts them there), so the two
+never drift apart. A step lasts at least its narration, and as much longer
+as its words waited. The subtitles are the words spoken, a sentence at a
+time, when they are spoken. Cues go at the start of a sentence or a
+clause: words that wait are cut there.
+
+`shot: true` takes the step's picture where it stands in the actions: the
+moment that shows what the page's text says, rather than whatever the step
+ends on.
+
+## An AI voice, said so
+
+The narration is synthetic speech (Kokoro). Whoever watches is told so
+from the first frame (EU AI Act, Art. 50): a line at the bottom of every
+card, and a small caption in the window's corner over the app. The page
+says so under the screencast's line, and the video's metadata does too
+(the file's comment and description, the sound's title). The line is
+`Voice: AI-generated (Kokoro)`; a script in another language gives its
+own as `voice_notice`. A video without a voice (`--no-voice`) has none.

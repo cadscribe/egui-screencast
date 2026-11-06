@@ -25,6 +25,9 @@ const SHOWN: f64 = 3.0;
 const PATIENCE: f64 = 60.0;
 /// Seconds a card takes to show and to go.
 const FADE: f64 = 0.4;
+/// Points from the window's right and bottom to the caption's box.
+const CAPTION_MARGIN: f32 = 16.0;
+const CAPTION_BOTTOM: f32 = 84.0;
 
 /// What the player needs of the app.
 pub trait Stage {
@@ -79,8 +82,11 @@ enum Phase {
     },
     /// The step's picture asked for in the frame before. A picture
     /// shows the frame it was asked in or the next one, so neither has
-    /// the pointer or is a frame of the video.
-    Shot,
+    /// the pointer or is a frame of the video. Asked for by an action
+    /// (`resume`: the step goes on with the next one) or at the step's end.
+    Shot {
+        resume: bool,
+    },
     /// Until the step has its seconds of video.
     Hold,
     /// Waiting for the last pictures.
@@ -93,6 +99,9 @@ struct Logged {
     name: String,
     start: u32,
     frames: u32,
+    /// The frame of each of its cues, from its start: where the runner
+    /// puts the narration's words from that cue on.
+    cues: Vec<u32>,
 }
 
 /// A plan being played and recorded.
@@ -110,6 +119,13 @@ pub struct Player {
     /// Frames of video so far.
     video_frames: u32,
     step_start: u32,
+    /// Frames the step's narration is behind its plan: actions before a
+    /// cue took longer than the words before it, and the words wait.
+    late: u32,
+    /// The step's cues so far, in frames from its start.
+    cues: Vec<u32>,
+    /// The step's picture was taken by an action.
+    shot_taken: bool,
     kept: serde_json::Map<String, Value>,
     /// Where the plan's pointer is, and where it started its glide.
     pointer: Option<Pos2>,
@@ -170,6 +186,9 @@ impl Player {
             clock: 0,
             video_frames: 0,
             step_start: 0,
+            late: 0,
+            cues: Vec::new(),
+            shot_taken: false,
             kept: serde_json::Map::new(),
             pointer: None,
             from: None,
@@ -277,7 +296,7 @@ impl Player {
                 self.queue(chars, egui::Modifiers::NONE);
                 true
             }
-            Action::Wait(_) => false,
+            Action::Wait(_) | Action::Cue(_) | Action::Shot => false,
             Action::App(v) => {
                 let now = self.seconds(self.clock);
                 let mut kept = std::mem::take(&mut self.kept);
@@ -298,6 +317,21 @@ impl Player {
         let t = self.seconds(self.clock - started);
         match action {
             Action::Wait(s) => t >= *s,
+            Action::Cue(at) => {
+                // Without a video there is no narration to wait for.
+                if !self.plan.video {
+                    return true;
+                }
+                let planned = self.frames_of(*at) as u32;
+                let elapsed = self.video_frames - self.step_start;
+                if elapsed < planned + self.late {
+                    return false;
+                }
+                // Come to late: the words from here on wait as long.
+                self.late = elapsed - planned;
+                self.cues.push(elapsed);
+                true
+            }
             Action::Zoom { factor, at } => {
                 let Some(to) = Self::locate(stage, at) else {
                     self.fail(format!("{at:?} is not shown"));
@@ -513,7 +547,7 @@ impl Player {
         let come = if first { 1.0 } else { elapsed / fade };
         let go = match self.phase {
             Phase::Hold if !last => {
-                let want = self.frames_of(self.plan.steps[self.step].seconds) as f32;
+                let want = self.step_frames() as f32;
                 (want - elapsed) / fade
             }
             _ => 1.0,
@@ -555,8 +589,61 @@ impl Player {
             egui::Order::Tooltip,
             egui::Id::unique("screencast_card"),
         ));
-        paint_card(&painter, ctx.content_rect(), &card, logo.as_ref(), k);
+        // Its parts come in once the card is half there (at once on the
+        // first step).
+        let elapsed = self.seconds(u64::from(self.video_frames - self.step_start));
+        let t = if self.step == 0 {
+            elapsed
+        } else {
+            elapsed - FADE / 2.0
+        };
+        paint_card(
+            &painter,
+            ctx.content_rect(),
+            &card,
+            logo.as_ref(),
+            self.plan.caption.as_deref(),
+            k,
+            t as f32,
+        );
         k
+    }
+
+    /// The plan's caption in the corner, over the app: that the voice is
+    /// synthetic. `k` of it shown (the card shows its own).
+    fn paint_caption(&self, ctx: &egui::Context, k: f32) {
+        let Some(text) = self.plan.caption.as_deref() else {
+            return;
+        };
+        if k <= 0.0 {
+            return;
+        }
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Debug,
+            egui::Id::unique("screencast_caption"),
+        ));
+        let galley = painter.layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::proportional(11.0),
+            Color32::from_gray(60).gamma_multiply(k),
+        );
+        // Above the bottom's status line and timeline, at the right, where
+        // an app seldom has what a tutorial points at.
+        let screen = ctx.content_rect();
+        let size = galley.size() + egui::vec2(16.0, 8.0);
+        let rect = Rect::from_min_size(
+            pos2(
+                screen.right() - CAPTION_MARGIN - size.x,
+                screen.bottom() - CAPTION_BOTTOM - size.y,
+            ),
+            size,
+        );
+        painter.rect_filled(rect, 6.0, Color32::WHITE.gamma_multiply(0.82 * k));
+        painter.galley(
+            rect.min + egui::vec2(8.0, 4.0),
+            galley,
+            Color32::from_gray(60),
+        );
     }
 
     /// Asks for this frame's picture: a frame of the video, or `shot`.
@@ -630,7 +717,7 @@ impl Player {
         let steps: Vec<Value> = self
             .log
             .iter()
-            .map(|l| json!({"name": l.name, "start": l.start, "frames": l.frames}))
+            .map(|l| json!({"name": l.name, "start": l.start, "frames": l.frames, "cues": l.cues}))
             .collect();
         let timeline = json!({
             "fps": self.plan.fps,
@@ -669,10 +756,21 @@ impl Player {
             Phase::Warm(_) => self.begin_step(stage, ctx),
             Phase::Act { started } => {
                 if let Some(a) = self.current() {
+                    if a == Action::Shot {
+                        // Its picture now; the step goes on after it.
+                        self.take_shot(stage, ctx, true);
+                        return false;
+                    }
                     // A failed action has ended the play: it stays ended.
                     if self.tick(stage, &a, started) && self.error.is_none() {
+                        // A cue is a moment, nothing to settle after.
+                        let settle = if matches!(a, Action::Cue(_)) {
+                            0
+                        } else {
+                            self.frames_of(SETTLE)
+                        };
                         self.phase = Phase::Settle {
-                            until: self.clock + self.frames_of(SETTLE),
+                            until: self.clock + settle,
                         };
                     } else if self.seconds(self.clock - started) > PATIENCE {
                         self.fail(format!("{a:?} took longer than {PATIENCE} s"));
@@ -685,29 +783,30 @@ impl Player {
                     self.action += 1;
                     if self.current().is_some() {
                         self.begin_action(stage, ctx);
-                    } else if let Some(name) = self.plan.steps[self.step].shot.clone() {
-                        stage.before_shot();
-                        self.phase = Phase::Shot;
-                        self.capture(ctx, Some(name));
-                        self.clock += 1;
+                    } else if !self.shot_taken && self.plan.steps[self.step].shot.is_some() {
+                        self.take_shot(stage, ctx, false);
                         return false;
                     } else {
                         self.phase = Phase::Hold;
                     }
                 }
             }
-            Phase::Shot => {
-                self.phase = Phase::Hold;
+            Phase::Shot { resume } => {
+                self.phase = if resume {
+                    Phase::Settle { until: self.clock }
+                } else {
+                    Phase::Hold
+                };
                 self.clock += 1;
                 return false;
             }
             Phase::Hold => {
-                let want = self.frames_of(self.plan.steps[self.step].seconds) as u32;
-                if self.video_frames - self.step_start >= want || !self.plan.video {
+                if self.video_frames - self.step_start >= self.step_frames() || !self.plan.video {
                     self.log.push(Logged {
                         name: self.plan.steps[self.step].name.clone(),
                         start: self.step_start,
                         frames: self.video_frames - self.step_start,
+                        cues: std::mem::take(&mut self.cues),
                     });
                     self.step += 1;
                     if self.step >= self.plan.steps.len() {
@@ -736,6 +835,7 @@ impl Player {
         if shown < 1.0 {
             self.paint_pointer(ctx);
         }
+        self.paint_caption(ctx, 1.0 - shown);
         if self.plan.video {
             self.capture(ctx, None);
             self.video_frames += 1;
@@ -744,9 +844,34 @@ impl Player {
         false
     }
 
+    /// Frames the step lasts at least: its narration and pause, and as
+    /// long again as its cues made the narration wait.
+    fn step_frames(&self) -> u32 {
+        self.frames_of(self.plan.steps[self.step].seconds) as u32 + self.late
+    }
+
+    /// Asks for the step's picture in this frame, which is then no frame of
+    /// the video: by an action (`resume`: the step goes on) or at the
+    /// step's end. A step without a picture (`shot: false`) takes none, and
+    /// none twice.
+    fn take_shot(&mut self, stage: &mut dyn Stage, ctx: &egui::Context, resume: bool) {
+        if let Some(name) = self.plan.steps[self.step].shot.clone()
+            && !self.shot_taken
+        {
+            stage.before_shot();
+            self.capture(ctx, Some(name));
+            self.shot_taken = true;
+        }
+        self.phase = Phase::Shot { resume };
+        self.clock += 1;
+    }
+
     fn begin_step(&mut self, stage: &mut dyn Stage, ctx: &egui::Context) {
         self.action = 0;
         self.step_start = self.video_frames;
+        self.late = 0;
+        self.cues.clear();
+        self.shot_taken = false;
         self.begin_action(stage, ctx);
     }
 
@@ -768,20 +893,56 @@ impl Player {
     }
 }
 
-/// A card in `screen`, `k` of it shown: its logo, title and subtitle, its
-/// points with the accent's dots, its link. With points it reads from the
-/// left, without (an ending) it is centred.
+/// How far a card's part has come in, 0 to 1, `t` seconds after the card
+/// began to show: from `from`, over `CARD_IN` seconds, fast then slow.
+fn coming(t: f32, from: f32) -> f32 {
+    let x = ((t - from) / CARD_IN).clamp(0.0, 1.0);
+    1.0 - (1.0 - x).powi(3)
+}
+
+/// When a card's parts come in, seconds after it began to show: the logo,
+/// the title, the subtitle, the accent's rule under them, the first point
+/// (the others each `CARD_POINT` later); the link after the last of them.
+const CARD_LOGO: f32 = 0.0;
+const CARD_TITLE: f32 = 0.3;
+const CARD_SUBTITLE: f32 = 0.55;
+const CARD_RULE: f32 = 0.8;
+const CARD_POINTS: f32 = 1.1;
+const CARD_POINT: f32 = 0.45;
+/// Seconds a part of a card takes to come in.
+const CARD_IN: f32 = 0.7;
+
+/// A card in `screen`, `k` of it shown, `t` seconds after it began to show:
+/// its logo, title and subtitle, its points with the accent's dots, its
+/// link, and the plan's caption at the bottom. With points it reads from
+/// the left, without (an ending) it is centred. The parts come in one
+/// after the other, each fading in and moving a little into its place.
 fn paint_card(
     painter: &egui::Painter,
     screen: Rect,
     card: &Card,
     logo: Option<&egui::TextureHandle>,
+    caption: Option<&str>,
     k: f32,
+    t: f32,
 ) {
     painter.rect_filled(screen, 0.0, card.background.gamma_multiply(k));
     let white = Color32::WHITE.gamma_multiply(k);
     let soft = Color32::from_white_alpha(200).gamma_multiply(k);
     let accent = card.accent.gamma_multiply(k);
+    // A galley in `colour`, `a` of it come in: faded, and moved by `(dx,
+    // dy)` times what is still to come.
+    let place =
+        |at: Pos2, g: std::sync::Arc<egui::Galley>, colour: Color32, a: f32, dx: f32, dy: f32| {
+            if a > 0.0 {
+                let at = at + egui::vec2(dx, dy) * (1.0 - a);
+                painter.add(egui::Shape::galley_with_override_text_color(
+                    at,
+                    g,
+                    colour.gamma_multiply(a),
+                ));
+            }
+        };
     let width = (screen.width() - 160.0).min(780.0);
     let centred = card.points.is_empty();
     let layout = |text: &str, size: f32, colour: Color32, wrap: f32| {
@@ -833,43 +994,196 @@ fn paint_card(
         }
     };
     let mut y = screen.center().y - height / 2.0;
-    if let Some(t) = logo {
+    if let Some(tex) = logo {
+        // Grows a little to its size about its centre as it fades in.
+        let a = coming(t, CARD_LOGO);
         let lx = if centred {
             screen.center().x - logo_size / 2.0
         } else {
             left
         };
         let r = Rect::from_min_size(pos2(lx, y), egui::vec2(logo_size, logo_size));
-        painter.image(
-            t.id(),
-            r,
-            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-            Color32::WHITE.gamma_multiply(k),
-        );
+        if a > 0.0 {
+            painter.image(
+                tex.id(),
+                r.scale_from_center(0.9 + 0.1 * a),
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE.gamma_multiply(k * a),
+            );
+        }
         y += logo_size + 28.0;
     }
     let h = title.size().y;
-    painter.galley(pos2(x(&title), y), title.clone(), white);
+    place(
+        pos2(x(&title), y),
+        title,
+        white,
+        coming(t, CARD_TITLE),
+        0.0,
+        16.0,
+    );
     y += h;
     if let Some(g) = subtitle {
         y += 12.0;
         let h = g.size().y;
-        painter.galley(pos2(x(&g), y), g, soft);
+        place(pos2(x(&g), y), g, soft, coming(t, CARD_SUBTITLE), 0.0, 12.0);
         y += h;
     }
+    // The accent's rule under the titles, drawn out from its start (from
+    // its middle when centred).
+    let gap = if points.is_empty() { 44.0 } else { 36.0 };
+    let rule = coming(t, CARD_RULE) * 56.0;
+    if rule > 0.5 && (!points.is_empty() || link.is_some()) {
+        let ry = y + gap / 2.0;
+        let (x0, x1) = if centred {
+            (
+                screen.center().x - rule / 2.0,
+                screen.center().x + rule / 2.0,
+            )
+        } else {
+            (left, left + rule)
+        };
+        painter.line_segment([pos2(x0, ry), pos2(x1, ry)], Stroke::new(3.0, accent));
+    }
+    // The link after the last point.
+    let mut next = CARD_POINTS;
     if !points.is_empty() {
         y += 36.0;
         for g in points {
+            let a = coming(t, next);
+            next += CARD_POINT;
             let row = g.rows.first().map_or(g.size().y, |r| r.rect().height());
-            painter.circle_filled(pos2(left + 8.0, y + row / 2.0), 6.0, accent);
+            if a > 0.0 {
+                painter.circle_filled(
+                    pos2(left + 8.0, y + row / 2.0),
+                    6.0 * (0.5 + 0.5 * a),
+                    accent.gamma_multiply(a),
+                );
+            }
             let h = g.size().y;
-            painter.galley(pos2(left + 32.0, y), g, white);
+            place(pos2(left + 32.0, y), g, white, a, -14.0, 0.0);
             y += h + 14.0;
         }
         y -= 14.0;
     }
     if let Some(g) = link {
         y += 44.0;
-        painter.galley(pos2(x(&g), y), g, accent);
+        place(pos2(x(&g), y), g, accent, coming(t, next + 0.1), 0.0, 10.0);
+    }
+    // The caption, at once: what a viewer is to know from the start.
+    if let Some(c) = caption {
+        let g = painter.layout_no_wrap(c.to_owned(), egui::FontId::proportional(14.0), soft);
+        let at = pos2(
+            screen.center().x - g.size().x / 2.0,
+            screen.bottom() - 28.0 - g.size().y,
+        );
+        place(at, g, soft, coming(t, 0.0), 0.0, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Nothing;
+
+    impl Stage for Nothing {
+        fn locate(&self, _: &Value) -> Option<Pos2> {
+            None
+        }
+
+        fn act(
+            &mut self,
+            _: &egui::Context,
+            _: &Value,
+            _: f64,
+            _: &mut serde_json::Map<String, Value>,
+        ) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+    }
+
+    /// The plan played until its steps are logged (its pictures are never
+    /// written without a renderer, so it does not finish).
+    fn play(name: &str, plan: &str) -> Player {
+        let dir = std::env::temp_dir().join(format!(
+            "egui-screencast-test-{}-{name}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plan.json");
+        std::fs::write(&path, plan).unwrap();
+        let mut player = Player::load(&path, &dir, "Assistant", Color32::BLUE).unwrap();
+        let ctx = egui::Context::default();
+        let steps = player.plan.steps.len();
+        for _ in 0..2000 {
+            let mut raw = egui::RawInput::default();
+            player.input(&mut raw);
+            let mut out = ctx.run_ui(raw, |ui| {
+                player.frame(&mut Nothing, ui.ctx());
+            });
+            out.textures_delta.clear();
+            if player.log.len() == steps {
+                break;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(player.log.len(), steps, "{:?}", player.error());
+        player
+    }
+
+    #[test]
+    fn a_cue_waits_for_its_words_and_the_words_for_a_late_cue() {
+        // Two seconds of narration: the first cue, at 0.2 s, comes after a
+        // wait of half a second, late; the second, at 1.0 s, is waited for.
+        let p = play(
+            "late",
+            r#"{"fps": 30, "steps": [{"seconds": 2.0, "actions": [
+                {"wait": 0.5}, {"cue": 0.2}, {"cue": 1.0}]}]}"#,
+        );
+        let log = &p.log[0];
+        let [first, second] = log.cues[..] else {
+            panic!("{:?}", log.cues);
+        };
+        assert!(first > 6, "the first cue is late: {first}");
+        // The words between the cues keep their time: the second cue is as
+        // late as the first.
+        assert_eq!(second - first, 30 - 6);
+        // The step as long as its narration and the time its words waited.
+        assert_eq!(log.frames, 60 + (first - 6));
+    }
+
+    #[test]
+    fn a_step_on_time_lasts_its_narration() {
+        let p = play(
+            "on-time",
+            r#"{"fps": 30, "steps": [{"seconds": 2.0, "actions": [{"cue": 1.0}]}]}"#,
+        );
+        assert_eq!(p.log[0].cues, [30]);
+        assert_eq!(p.log[0].frames, 60);
+    }
+
+    #[test]
+    fn a_picture_by_an_action_is_taken_once() {
+        let p = play(
+            "shot",
+            r#"{"fps": 30, "steps": [{"seconds": 0.5, "shot": "a.png",
+                "actions": [{"shot": true}, {"wait": 0.2}]}]}"#,
+        );
+        assert!(p.shot_taken);
+        // Asked for once: the step's end takes none again.
+        assert_eq!(
+            p.frames.lock().unwrap().pending,
+            p.log[0].frames as usize + 1
+        );
+    }
+
+    #[test]
+    fn a_card_comes_in_part_by_part() {
+        assert!(coming(0.0, CARD_TITLE).abs() < 1e-6);
+        assert!((coming(CARD_TITLE + CARD_IN, CARD_TITLE) - 1.0).abs() < 1e-6);
+        // Fast, then slow.
+        let half = coming(CARD_TITLE + CARD_IN / 2.0, CARD_TITLE);
+        assert!(half > 0.8 && half < 1.0, "{half}");
     }
 }

@@ -21,6 +21,14 @@ script, for each tutorial named:
         [--tutorials docs/tutorials] [--work target/tutorials]
         [--no-voice] [--no-video] [--window] [NAME…]
 
+What is said and what is seen go together: an action `cue: "Open it"`
+waits until the narration says those words (Kokoro's times of its words),
+and should the actions before it take longer, the words from there on wait
+instead. `shot: true` takes the step's picture there rather than at the
+step's end. The subtitles are the words spoken, when they are spoken. The
+voice is said to be synthetic on the cards, in a corner of the video, on
+the page and in the video's metadata (`voice_notice` in another language).
+
 In an `--app-arg`, `{work}` is the tutorial's work folder (an app's own
 settings folder, say). Paths are taken from the folder it is run in. Without
 names, every tutorial is built. Work files are kept in `<work>/<name>/`.
@@ -53,6 +61,14 @@ WORDS_PER_SECOND = 2.6
 # The video's size: the window (1280 × 800 points) at 1.5 pixels a point.
 VIDEO_WIDTH = 1920
 SHOT_WIDTH = 1600
+# That the voice is synthetic, for whoever watches (EU AI Act, Art. 50): on
+# the cards and in a corner of the video, on the page, and in the video's
+# metadata. A script in another language says it in its own
+# (`voice_notice`).
+VOICE_NOTICE = "Voice: AI-generated (Kokoro)"
+# A subtitle ends at a sentence's end, at a cue, or at a comma once it is
+# this long.
+SUBTITLE_CHARS = 80
 
 def fail(message: str) -> None:
     sys.exit(f"tutorials: {message}")
@@ -101,8 +117,25 @@ def shot_name(i: int, step: dict) -> str | None:
     return f"{i + 1:02d}-{step['name']}.png"
 
 
-def narrate(name: str, script: dict, voice: bool) -> list[tuple[Path | None, float]]:
-    """Each step's audio file and its seconds."""
+def guessed_words(text: str) -> list[dict]:
+    """The words of `text` as if spoken at `WORDS_PER_SECOND`, when it is
+    not (`--no-voice`): for cues and subtitles all the same."""
+    words = []
+    for i, w in enumerate(text.split()):
+        words.append(
+            {
+                "text": w,
+                "start": round(i / WORDS_PER_SECOND, 3),
+                "end": round((i + 1) / WORDS_PER_SECOND, 3),
+                "space": True,
+            }
+        )
+    return words
+
+
+def narrate(name: str, script: dict, voice: bool) -> list[dict]:
+    """Each step's narration: its audio file (`wav`, none without a voice),
+    its `seconds` and its `words`, each with when it starts and ends."""
     out = []
     speaker = script.get("voice", "am_michael")
     speed = float(script.get("speed", 1.0))
@@ -112,18 +145,68 @@ def narrate(name: str, script: dict, voice: bool) -> list[tuple[Path | None, flo
     for i, step in enumerate(script["steps"]):
         text = spoken(step.get("say") or step.get("text", ""))
         if not text:
-            out.append((None, 0.0))
+            out.append({"wav": None, "seconds": 0.0, "words": []})
             continue
         if not voice:
-            out.append((None, len(text.split()) / WORDS_PER_SECOND))
+            out.append(
+                {"wav": None, "seconds": len(text.split()) / WORDS_PER_SECOND, "words": guessed_words(text)}
+            )
             continue
         wav = WORK / "audio" / f"{kokoro.key(text, speaker, speed)}.wav"
-        if wav.exists():
+        words = kokoro.words(wav) if wav.exists() else None
+        if words is not None:
             seconds = kokoro.duration(wav)
         else:
+            # Spoken again when the words of an older run were not kept.
             print(f"  narration {i + 1}: {text[:60]}…", flush=True)
             seconds = kokoro.speak(text, wav, speaker, speed)
-        out.append((wav, seconds))
+            words = kokoro.words(wav) or []
+        out.append({"wav": wav, "seconds": seconds, "words": words})
+    return out
+
+
+def normal(text: str) -> list[str]:
+    """The words of `text` to compare: small letters and digits."""
+    return re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)*", text.lower())
+
+
+def find_words(words: list[dict], phrase: str, after: int) -> tuple[int, int] | None:
+    """Where `phrase` is said in `words`, from the word `after` on: the
+    index of its first word and of the word after its last."""
+    want = normal(spoken(phrase))
+    if not want:
+        return None
+    # Each compared word with the index of the spoken word it is part of.
+    flat = [(w, i) for i, word in enumerate(words) for w in normal(word["text"])]
+    for k in range(len(flat) - len(want) + 1):
+        if flat[k][1] < after:
+            continue
+        if [w for w, _ in flat[k : k + len(want)]] == want:
+            last = flat[k + len(want) - 1][1]
+            return flat[k][1], last + 1
+    return None
+
+
+def cue_actions(name: str, i: int, step: dict, words: list[dict]) -> list:
+    """The step's actions with each cue's words (`cue: "Open it"`) made the
+    seconds into its narration when they are said (`{"cue": 3.2}`): the
+    actions after it wait for them. Cues follow the narration's order."""
+    out = []
+    after = 0
+    for a in step.get("actions", []):
+        if isinstance(a, dict) and isinstance(a.get("cue"), str):
+            found = find_words(words, a["cue"], after)
+            if found is None:
+                fail(
+                    f"{name}: step {i + 1} ({step['name']}): the cue {a['cue']!r} is not in "
+                    "what it says, or not after the cue before it"
+                )
+            first, after = found
+            out.append({"cue": words[first]["start"], "words": a["cue"]})
+        else:
+            if isinstance(a, dict) and a.get("shot") is True and step.get("shot", True) is False:
+                fail(f"{name}: step {i + 1} ({step['name']}): shot: true in a step without a picture")
+            out.append(a)
     return out
 
 
@@ -142,15 +225,21 @@ def absolute(value, base: Path, work: Path):
     return value
 
 
-def plan(name: str, script: dict, audio, video: bool) -> dict:
+def voice_notice(script: dict) -> str:
+    """The line that says the voice is synthetic, in the script's language."""
+    return str(script.get("voice_notice") or VOICE_NOTICE).strip()
+
+
+def plan(name: str, script: dict, audio, video: bool, voice: bool) -> dict:
     steps = []
     for i, step in enumerate(script["steps"]):
+        actions = cue_actions(name, i, step, audio[i]["words"])
         steps.append(
             {
                 "name": step["name"],
-                "actions": absolute(step.get("actions", []), ROOT, WORK / name),
+                "actions": absolute(actions, ROOT, WORK / name),
                 "shot": shot_name(i, step),
-                "seconds": round(audio[i][1] + PAUSE, 3),
+                "seconds": round(audio[i]["seconds"] + PAUSE, 3),
             }
         )
         if step.get("card"):
@@ -158,7 +247,10 @@ def plan(name: str, script: dict, audio, video: bool) -> dict:
             if card.get("logo"):
                 card["logo"] = str((ROOT / card["logo"]).resolve())
             steps[-1]["card"] = card
-    return {"fps": FPS, "video": video, "shot_width": SHOT_WIDTH, "steps": steps}
+    the_plan = {"fps": FPS, "video": video, "shot_width": SHOT_WIDTH, "steps": steps}
+    if voice:
+        the_plan["caption"] = voice_notice(script)
+    return the_plan
 
 
 def play(name: str, the_plan: dict) -> dict:
@@ -203,37 +295,117 @@ def srt_time(seconds: float) -> str:
     return f"{ms // 3_600_000:02d}:{ms // 60_000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
 
 
-def video(name: str, script: dict, audio, timeline: dict) -> Path:
+def shifts(planned: list[dict], logged: dict, fps: float) -> list[tuple[float, float]]:
+    """Each cue of a step as (seconds into its narration, seconds the
+    words from there on are later than planned): the actions before it
+    took longer than the words, and the player waited for them."""
+    cues = [a["cue"] for a in planned if isinstance(a, dict) and isinstance(a.get("cue"), (int, float))]
+    out = []
+    late = 0.0
+    for k, at in enumerate(cues):
+        reached = logged.get("cues", [])
+        if k < len(reached):
+            late = max(late, (reached[k] - round(at * fps)) / fps)
+        out.append((at, late))
+    return out
+
+
+def late_at(cues: list[tuple[float, float]], t: float) -> float:
+    """How much later than planned what is said at `t` is."""
+    late = 0.0
+    for at, shift in cues:
+        if t + 1e-6 >= at:
+            late = shift
+    return late
+
+
+def subtitles_of(words: list[dict], cues: list[tuple[float, float]]) -> list[tuple[float, float, str]]:
+    """A step's subtitles from its words, as (start, end, text) in seconds
+    from the step's start: what is said, when it is said. One ends at a
+    sentence's end, where a cue moves the words, or at a comma once long."""
+    out = []
+    group: list[dict] = []
+
+    def close():
+        if not group:
+            return
+        text = "".join(w["text"] + (" " if w["space"] else "") for w in group).strip()
+        if text:
+            first, last = group[0], group[-1]
+            out.append(
+                (
+                    first["start"] + late_at(cues, first["start"]),
+                    last["end"] + late_at(cues, last["start"]),
+                    text,
+                )
+            )
+        group.clear()
+
+    for i, w in enumerate(words):
+        if group and late_at(cues, w["start"]) != late_at(cues, group[0]["start"]):
+            close()
+        group.append(w)
+        length = sum(len(x["text"]) + 1 for x in group)
+        end = w["text"] in (".", "!", "?") or (length >= SUBTITLE_CHARS and w["text"] in (",", ";", ":"))
+        if end or i + 1 == len(words):
+            close()
+    # Each shown until the next comes.
+    return [
+        (s, min(e, out[k + 1][0]) if k + 1 < len(out) else e, t) for k, (s, e, t) in enumerate(out)
+    ]
+
+
+def video(name: str, script: dict, audio, the_plan: dict, timeline: dict) -> Path:
     if not shutil.which("ffmpeg"):
         fail("ffmpeg is missing (brew install ffmpeg), or build without video: --no-video")
     work = WORK / name
     fps = timeline["fps"]
-    # The narration: each step's audio at the step's first frame, quiet to
-    # its last.
+    # The narration: each step's audio from the step's first frame, its
+    # words after a cue as much later as the cue came late; quiet to its
+    # last frame.
     import numpy as np
     import soundfile as sf
 
     rate = 24_000
     track = np.zeros(round(timeline["frames"] / fps * rate), dtype=np.float32)
     srt = []
-    for i, (step, logged) in enumerate(zip(script["steps"], timeline["steps"])):
+    for i, (planned, logged) in enumerate(zip(the_plan["steps"], timeline["steps"])):
         start = logged["start"] / fps
-        wav, seconds = audio[i]
+        cues = shifts(planned["actions"], logged, fps)
+        wav = audio[i]["wav"]
         if wav is not None:
             data, r = sf.read(wav, dtype="float32")
             assert r == rate, f"{wav}: {r} Hz"
-            at = round(start * rate)
-            data = data[: max(0, len(track) - at)]
-            track[at : at + len(data)] = data
-        text = plain(step.get("text", ""))
-        if text:
-            end = start + max(seconds, logged["frames"] / fps - PAUSE)
-            srt.append(f"{len(srt) + 1}\n{srt_time(start)} --> {srt_time(end)}\n{text}\n")
+            cuts = [0] + [min(len(data), round(at * rate)) for at, _ in cues] + [len(data)]
+            lates = [0.0] + [late for _, late in cues]
+            for k, late in enumerate(lates):
+                piece = data[cuts[k] : cuts[k + 1]]
+                at = round((start + late) * rate) + cuts[k]
+                piece = piece[: max(0, len(track) - at)]
+                track[at : at + len(piece)] = piece
+        for s, e, text in subtitles_of(audio[i]["words"], cues):
+            srt.append(f"{len(srt) + 1}\n{srt_time(start + s)} --> {srt_time(start + e)}\n{text}\n")
     narration = work / "narration.wav"
     sf.write(narration, track, rate, subtype="PCM_16")
     subtitles = work / "subtitles.srt"
     subtitles.write_text("\n".join(srt), encoding="utf-8")
     out = DOCS / name / f"{name}.mp4"
+    voiced = "caption" in the_plan
+    speaker = script.get("voice", "am_michael")
+    # That the voice is synthetic, readable by machines too (Art. 50(2)):
+    # the file's comment and description, and the sound's own title.
+    disclosure = (
+        [
+            "-metadata", f"comment={voice_notice(script)}. The narration is synthetic speech "
+            f"made by the Kokoro-82M text-to-speech model (voice {speaker}).",
+            "-metadata", f"description={script.get('summary', '').strip()} "
+            f"[{voice_notice(script)}]",
+            "-metadata:s:a:0", f"title=AI-generated voice (Kokoro-82M, {speaker})",
+            "-metadata:s:a:0", f"handler_name=AI-generated voice (Kokoro-82M, {speaker})",
+        ]
+        if voiced
+        else []
+    )
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
         "-f", "concat", "-safe", "0", "-i", work / "recording" / "frames.txt",
@@ -245,6 +417,7 @@ def video(name: str, script: dict, audio, timeline: dict) -> Path:
         "-c:a", "aac", "-b:a", "128k",
         "-c:s", "mov_text", "-metadata:s:s:0", "language=eng",
         "-metadata", f"title={script['title']}",
+        *disclosure,
         "-movflags", "+faststart",
         "-t", f"{timeline['frames'] / fps:.3f}",
         out,
@@ -268,6 +441,11 @@ def readme(name: str, script: dict, the_plan: dict) -> None:
     lines += [
         f"**Screencast:** `{name}.mp4` beside this page, with narration, is built by "
         f"`make tutorial NAME={name}` (not in the repository, see [the index](../README.md)).",
+        "",
+        f"**{voice_notice(script)}.** The screencast's narration is synthetic speech, made by "
+        f"the Kokoro-82M text-to-speech model (voice `{script.get('voice', 'am_michael')}`) "
+        "from the text of this page; no person speaks it. The video says so on its first "
+        "card and in a corner throughout, and in its metadata.",
         "",
     ]
     for i, (step, planned) in enumerate(zip(script["steps"], the_plan["steps"])):
@@ -293,12 +471,12 @@ def build(name: str, voice: bool, with_video: bool) -> None:
     print(f"{name}:", flush=True)
     script = load(name)
     audio = narrate(name, script, voice)
-    the_plan = plan(name, script, audio, with_video)
+    the_plan = plan(name, script, audio, with_video, voice)
     timeline = play(name, the_plan)
     copy_shots(name, the_plan)
     readme(name, script, the_plan)
     if with_video:
-        out = video(name, script, audio, timeline)
+        out = video(name, script, audio, the_plan, timeline)
         seconds = timeline["frames"] / timeline["fps"]
         print(f"  {out.relative_to(ROOT)}: {seconds:.1f} s", flush=True)
     print(f"  {(DOCS / name / 'README.md').relative_to(ROOT)}, {sum(1 for s in the_plan['steps'] if s['shot'])} pictures")
