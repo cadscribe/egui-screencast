@@ -398,7 +398,7 @@ def video(name: str, script: dict, audio, the_plan: dict, timeline: dict) -> Pat
         [
             "-metadata", f"comment={voice_notice(script)}. The narration is synthetic speech "
             f"made by the Kokoro-82M text-to-speech model (voice {speaker}).",
-            "-metadata", f"description={script.get('summary', '').strip()} "
+            "-metadata", f"description={' '.join(plain(script.get('summary', '')).split())} "
             f"[{voice_notice(script)}]",
             "-metadata:s:a:0", f"title=AI-generated voice (Kokoro-82M, {speaker})",
             "-metadata:s:a:0", f"handler_name=AI-generated voice (Kokoro-82M, {speaker})",
