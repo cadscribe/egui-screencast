@@ -15,6 +15,10 @@ eframe = { version = "=0.37.0", default-features = false, features = ["wgpu"] }
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
 serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
 
+# winit builds on Linux only with a windowing system to talk to.
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "=0.37.0", default-features = false, features = ["wgpu", "x11", "wayland"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
