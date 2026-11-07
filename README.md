@@ -67,12 +67,13 @@ in the app and writes `images/`, `README.md` and `<name>.mp4` (ffmpeg):
         [--no-voice] [--no-video] [--window] [--app-name NAME] \
         [--voice elevenlabs:<voice id>] [--dry-run] [NAME…]
 
-## Voices: Kokoro or ElevenLabs
+## Voices: Kokoro, ElevenLabs or Fish Audio S2 Pro
 
 Kokoro is the default: local, free, the model at a fixed revision. The
 voice is chosen by `--voice`, else `$SCREENCAST_VOICE`, else the script's
 `voice:`; a bare name (`am_michael`) or `kokoro:<name>` is Kokoro,
-`elevenlabs:<voice id>` is ElevenLabs:
+`elevenlabs:<voice id>` is ElevenLabs, `fish-s2-pro:<reference.wav>` is
+Fish Audio S2 Pro run locally (below):
 
     export ELEVENLABS_API_KEY=…            # elevenlabs.io → Developers → API keys
     python scripts/elevenlabs.py voices    # your voices and their ids (costs nothing)
@@ -105,7 +106,8 @@ never asked for again; only new or changed text is sent. An entry is a
 folder (`audio.wav`, `words.json`, `meta.json`) made whole and then renamed
 into place, so a failed request (no key, HTTP 401, 429, …) leaves nothing
 behind, and the sections spoken before it are kept. It lives in
-`<work>/voices/elevenlabs` (`--voice-cache DIR`, `$SCREENCAST_VOICE_CACHE`),
+`<work>/voices` (`--voice-cache DIR`, `$SCREENCAST_VOICE_CACHE`), with
+Fish S2 Pro's (their keys say which backend),
 beside Kokoro's model in `<work>/hf` and Kokoro's sections in
 `<work>/audio`.
 
@@ -117,10 +119,70 @@ a changed sentence, another voice, model or setting is that section (or
 all of them) again. Old entries go with
 
     python scripts/tutorial.py --prune-voice-cache 30   # not used for 30 days
-    python scripts/elevenlabs.py prune --older-than 30 --cache target/tutorials/voices/elevenlabs
+    python scripts/elevenlabs.py prune --older-than 30 --cache target/tutorials/voices
 
 Tests use a fake API: `python3 -m unittest discover scripts` never calls
 ElevenLabs.
+
+### Fish Audio S2 Pro, run locally
+
+[S2 Pro](https://huggingface.co/fishaudio/s2-pro) (5B parameters, open
+weights) runs on the computer, on Apple Silicon on the GPU by MPS, else
+the CPU: nothing is sent anywhere, nothing is billed, but it is slow and
+needs memory (the weights are about 11 GB in bf16; 32 GB of RAM or more).
+On an M1 Max (64 GB, busy with other work) loading took 3 minutes and a
+sentence of 7.5 s took 107 s (1.5 tokens a second, about 14 times the
+speech's length): an hour or more for a tutorial the first time. Every
+section is cached like ElevenLabs' (the key: backend, model and
+fish-speech at their revisions, the aligner, the reference recording's
+bytes and words, the settings, the output format, the text), so only
+what changed is spoken again.
+
+**Licence.** S2 Pro's weights are under the **Fish Audio Research
+License: research and non-commercial use only**; commercial use needs a
+licence from Fish Audio (business@fish.audio). Whether a tutorial video
+is non-commercial is yours to judge. The notices say it: the card line
+and corner name `Fish Audio S2 Pro`, the page names the licence, the
+MP4's comment and its sound's title too. The aligner
+(facebook/wav2vec2-base-960h) is Apache 2.0.
+
+**Its venv.** fish-speech pins its own torch (2.8.0) and transformers, so
+it gets a venv of its own beside the tutorial one, from
+`scripts/requirements-fish.txt` (fish-speech's own lock at a fixed commit,
+installed without resolving again):
+
+    uv venv -p 3.12 target/tutorials/fish-venv
+    VIRTUAL_ENV=target/tutorials/fish-venv uv pip install --no-deps -r scripts/requirements-fish.txt
+
+The runner starts `scripts/fishspeech_worker.py` with that Python
+(`--fish-python`, `$FISH_SPEECH_PYTHON`, else
+`<work>/fish-venv/bin/python`) on the first section not in the cache; it
+loads the model once (from Hugging Face on first use, into `<work>/hf`)
+and speaks one section after the other.
+
+**The voice** is a reference recording: a WAV of 10 to 30 seconds, and
+what is said in it beside it (`narrator.lab` or `.txt`, or the script's
+`voice_reference_text`). Without one S2 Pro would choose another voice for
+each section. Use a voice you may use: your own, a licensed one, or one
+made by Kokoro:
+
+    python scripts/narrate.py "Hello, I am the narrator of these tutorials. …" voices/narrator.wav
+    echo "Hello, I am the narrator of these tutorials. …" > voices/narrator.lab
+    python scripts/tutorial.py --app … --voice fish-s2-pro:voices/narrator.wav
+
+`voice_settings:` (or `--voice-setting K=V`) sets `seed` (42: the same
+text, the same sound), `temperature`, `top_p` (0.7 each), `chunk_length`
+(200) and `normalize` (true). The script's `speed` does not apply.
+
+**Word times.** S2 Pro run locally gives none. They are found by forced
+alignment (`scripts/align.py`): wav2vec2-base-960h (English letters, a
+frame each 20 ms) says how likely each letter is in each frame of the
+speech, and the most likely path through the text's letters in order gives
+each word its first and last frame; numbers are spelled for it
+(num2words). A word's start is right to about a frame or two (20 to
+40 ms), which is far finer than a cue needs. Should the path not be found
+(a text not in English, say), the times are spread by the words' lengths,
+and cues are then only roughly right.
 
 ## What is said with what is seen
 
@@ -153,13 +215,15 @@ ends on.
 
 ## An AI voice, said so
 
-The narration is synthetic speech (Kokoro or ElevenLabs). Whoever watches
+The narration is synthetic speech (Kokoro, ElevenLabs or Fish Audio S2
+Pro). Whoever watches
 is told so from the first frame (EU AI Act, Art. 50): a line at the bottom
 of every card, and a small caption in the window's corner over the app.
 The page says so under the screencast's line, and the video's metadata
 does too (the file's comment and description, the sound's title). The line
 names the voice: `Voice: AI-generated (Kokoro)`, `Voice: AI-generated
-(ElevenLabs, George)`; a script in another language gives its own as
+(ElevenLabs, George)`, `Voice: AI-generated (Fish Audio S2 Pro,
+narrator)`; a script in another language gives its own as
 `voice_notice` (`{voice}` in it is that name). A video without a voice
 (`--no-voice`) has none.
 

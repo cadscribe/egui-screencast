@@ -94,10 +94,12 @@ def setting(value: str):
     low = value.strip().lower()
     if low in ("true", "false"):
         return low == "true"
-    try:
-        return float(value)
-    except ValueError:
-        return value
+    for kind in (int, float):
+        try:
+            return kind(value)
+        except ValueError:
+            pass
+    return value
 
 
 # Characters of a word besides letters and digits when between two of them:
@@ -398,7 +400,7 @@ def _main(argv: list[str]) -> None:
 
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("command", choices=["voices", "prune", "stats"])
-    p.add_argument("--cache", default="target/tutorials/voices/elevenlabs", help="the cache folder")
+    p.add_argument("--cache", default="target/tutorials/voices", help="the cache folder")
     p.add_argument("--older-than", type=float, default=30, help="prune: days not used")
     a = p.parse_args(argv)
     try:

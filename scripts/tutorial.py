@@ -6,7 +6,9 @@ steps, each with its text, what it does in the app and its picture. This
 script, for each tutorial named:
 
 1. speaks each step's text with Kokoro (`narrate.py`) or ElevenLabs
-   (`elevenlabs.py`, `--voice elevenlabs:<voice id>`), each section kept in
+   (`elevenlabs.py`, `--voice elevenlabs:<voice id>`) or Fish Audio S2 Pro
+   run locally (`fishspeech.py`, `--voice fish-s2-pro:<reference.wav>`),
+   each section kept in
    a cache and spoken again only when it changed, or, with `--no-voice`,
    guesses how long it would take; first, over the first step's card, the
    voice says that it is an AI voice and why (`voice_intro`);
@@ -79,10 +81,15 @@ VOICE_NOTICE = "Voice: AI-generated (Kokoro)"
 # ElevenLabs model and settings over the script's, and where ElevenLabs'
 # sections are kept: set from the command line in `main`.
 KOKORO_VOICE = "am_michael"
+# The names of Fish Audio S2 Pro, run locally (`fishspeech.py`).
+FISH_NAMES = ("fish-s2-pro", "fishaudio-s2-pro", "fishaudio")
+# The Python of the Fish venv (`--fish-python`, $FISH_SPEECH_PYTHON, else
+# <work>/fish-venv/bin/python).
+FISH_PYTHON: Path | None = None
 VOICE: str | None = None
 VOICE_MODEL: str | None = None
 VOICE_SETTINGS: dict = {}
-VOICE_CACHE = WORK / "voices" / "elevenlabs"
+VOICE_CACHE = WORK / "voices"
 # What the voice says first, over the first step's card: that it is an AI
 # voice, and why (a script's `voice_intro`, `--voice-intro`; off only by
 # `voice_intro: false` or `--no-voice-intro`). `{app}` is the app's name.
@@ -161,13 +168,15 @@ def guessed_words(text: str) -> list[dict]:
 def voice_choice(script: dict) -> tuple[str, str]:
     """The backend and the voice: `--voice`, else `$SCREENCAST_VOICE`, else
     the script's `voice`, else Kokoro's am_michael. `elevenlabs:<voice id>`
-    is ElevenLabs, `kokoro:<voice>` or a bare name is Kokoro."""
+    is ElevenLabs, `fish-s2-pro:<reference.wav>` Fish Audio S2 Pro (run
+    locally), `kokoro:<voice>` or a bare name is Kokoro."""
     choice = str(VOICE or os.environ.get("SCREENCAST_VOICE") or script.get("voice") or KOKORO_VOICE).strip()
     backend, sep, rest = choice.partition(":")
-    if sep and backend.lower() in ("elevenlabs", "kokoro"):
+    backend = backend.lower()
+    if sep and backend in ("elevenlabs", "kokoro", *FISH_NAMES):
         if not rest.strip():
             fail(f"voice {choice!r}: no voice after {backend}:")
-        return backend.lower(), rest.strip()
+        return ("fish-s2-pro" if backend in FISH_NAMES else backend), rest.strip()
     return "kokoro", choice
 
 
@@ -222,6 +231,29 @@ def speaker_of(script: dict, dry_run: bool = False, opener=None) -> dict:
             "made_by_md": f"the Kokoro-82M text-to-speech model (voice `{voice}`)",
             "track": f"Kokoro-82M, {voice}",
             "narrator": lambda: Kokoro(voice, speed, dry_run),
+        }
+    if backend == "fish-s2-pro":
+        import fishspeech
+
+        settings = dict(fishspeech.SETTINGS)
+        settings.update(script.get("voice_settings") or {})
+        settings.update(VOICE_SETTINGS)
+        the_voice = fishspeech.Voice((ROOT / voice).resolve(), str(script.get("voice_reference_text") or ""), settings)
+        name = str(script.get("voice_name") or the_voice.name).strip()
+        python = FISH_PYTHON or WORK / "fish-venv" / "bin" / "python"
+        hf_home = os.environ.get("HF_HOME", str(WORK / "hf"))
+        return {
+            "backend": "fish-s2-pro",
+            "voice": voice,
+            "label": f"Fish Audio S2 Pro, {name}",
+            "made_by": f"Fish Audio S2 Pro, run locally from its open weights ({fishspeech.LICENCE}), "
+            f"in the voice of the reference recording {name}",
+            "made_by_md": f"Fish Audio S2 Pro, run locally from its open weights (licence: {fishspeech.LICENCE}; "
+            f"commercial use needs a licence from Fish Audio), in the voice of the reference recording {name}",
+            "track": f"Fish Audio S2 Pro, {name}; {fishspeech.LICENCE}",
+            "narrator": lambda: fishspeech.Narrator(
+                the_voice, VOICE_CACHE, fishspeech.Worker(python, {"HF_HOME": hf_home}), dry_run
+            ),
         }
     import urllib.request
 
@@ -338,6 +370,9 @@ def narrate(name: str, script: dict, voice: bool, speaker: dict | None = None, n
         }
     if voice:
         print(f"  {narrator.report()}", flush=True)
+        close = getattr(narrator, "close", None)
+        if close:
+            close()
     return out
 
 
@@ -692,24 +727,27 @@ def main() -> None:
     p.add_argument(
         "--voice",
         help="the voice, over the script's and $SCREENCAST_VOICE: a Kokoro voice (am_michael, "
-        "kokoro:af_heart) or elevenlabs:<voice id> (needs $ELEVENLABS_API_KEY)",
+        "kokoro:af_heart), elevenlabs:<voice id> (needs $ELEVENLABS_API_KEY) or "
+        "fish-s2-pro:<reference.wav> (local, non-commercial licence)",
     )
     p.add_argument("--voice-model", help="ElevenLabs' model (else $ELEVENLABS_MODEL, the script's voice_model, "
                    f"{'eleven_multilingual_v2'})")
     p.add_argument("--voice-setting", action="append", default=[], metavar="K=V",
-                   help="an ElevenLabs voice setting (stability=0.4, style=0.2, speed=1.05, …)")
-    p.add_argument("--voice-cache", help="the cache of ElevenLabs' sections (else $SCREENCAST_VOICE_CACHE, "
-                   "<work>/voices/elevenlabs)")
+                   help="a voice setting of ElevenLabs (stability=0.4, speed=1.05, …) or Fish (seed=7, …)")
+    p.add_argument("--voice-cache", help="the cache of ElevenLabs' and Fish S2 Pro's sections (else "
+                   "$SCREENCAST_VOICE_CACHE, <work>/voices)")
+    p.add_argument("--fish-python", help="the Python of the Fish venv (else $FISH_SPEECH_PYTHON, "
+                   "<work>/fish-venv/bin/python)")
     p.add_argument("--dry-run", action="store_true",
                    help="only count the sections not in the cache and the characters they would send")
     p.add_argument("--prune-voice-cache", type=float, metavar="DAYS",
-                   help="remove ElevenLabs sections not used for DAYS days, then end")
+                   help="remove cached sections (ElevenLabs, Fish) not used for DAYS days, then end")
     p.add_argument("--app-name", help="the app's name in the voice's own notice (a script's app: wins)")
     p.add_argument("--voice-intro", help="what the voice says first (a script's voice_intro: wins; {app} its name)")
     p.add_argument("--no-voice-intro", action="store_true", help="the voice does not say first that it is AI")
     a = p.parse_args()
     global WINDOW, DOCS, WORK, APP, APP_ARGS, APP_ENV, VOICE, VOICE_MODEL, VOICE_SETTINGS, VOICE_CACHE
-    global APP_NAME, VOICE_INTRO
+    global APP_NAME, VOICE_INTRO, FISH_PYTHON
     WINDOW = a.window
     DOCS = (ROOT / a.tutorials).resolve()
     WORK = (ROOT / a.work).resolve()
@@ -723,7 +761,9 @@ def main() -> None:
             fail(f"--voice-setting {kv!r}: K=V")
         VOICE_SETTINGS[k.strip()] = elevenlabs.setting(v)
     cache = a.voice_cache or os.environ.get("SCREENCAST_VOICE_CACHE")
-    VOICE_CACHE = (ROOT / cache).resolve() if cache else WORK / "voices" / "elevenlabs"
+    VOICE_CACHE = (ROOT / cache).resolve() if cache else WORK / "voices"
+    fish = a.fish_python or os.environ.get("FISH_SPEECH_PYTHON")
+    FISH_PYTHON = (ROOT / fish).resolve() if fish else None
     APP_NAME = a.app_name
     VOICE_INTRO = False if a.no_voice_intro else (a.voice_intro or VOICE_INTRO_DEFAULT)
     if a.prune_voice_cache is not None:
