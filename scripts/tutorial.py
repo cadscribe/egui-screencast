@@ -265,8 +265,9 @@ def voice_intro(script: dict) -> str | None:
     an AI voice, and why. The script's `voice_intro` (its own words, in its
     own language; `{app}` the app's name), else `--voice-intro`, else the
     English default with the script's `app` or `--app-name`; none only when
-    turned off (`voice_intro: false`, `--no-voice-intro`)."""
-    said = script.get("voice_intro", VOICE_INTRO)
+    turned off (`voice_intro: false`, or for every script
+    `--no-voice-intro`)."""
+    said = False if VOICE_INTRO is False else script.get("voice_intro", VOICE_INTRO)
     if said is False or said is None:
         return None
     if said is True:

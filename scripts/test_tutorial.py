@@ -150,6 +150,7 @@ class VoiceIntro(unittest.TestCase):
         self.assertIsNone(tutorial.voice_intro({"voice_intro": False}))
         with mock.patch.object(tutorial, "VOICE_INTRO", False):
             self.assertIsNone(tutorial.voice_intro({}))
+            self.assertIsNone(tutorial.voice_intro({"voice_intro": "Said anyway?"}))
         narrator = FakeNarrator(Path(self.tmp.name))
         audio = tutorial.narrate("t", dict(self.script, voice_intro=False), True, narrator=narrator)
         self.assertEqual(audio[0]["lead"], 0)
