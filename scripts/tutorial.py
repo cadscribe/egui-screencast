@@ -763,8 +763,8 @@ def video(name: str, script: dict, audio, the_plan: dict, timeline: dict, speake
                 at = round((start + late) * rate) + cuts[k]
                 piece = piece[: max(0, len(track) - at)]
                 track[at : at + len(piece)] = piece
-        for s, e, text in subtitles_of(audio[i]["words"], cues):
-            srt.append(f"{len(srt) + 1}\n{srt_time(start + s)} --> {srt_time(start + e)}\n{text}\n")
+        for s, e, said in subtitles_of(audio[i]["words"], cues):
+            srt.append(f"{len(srt) + 1}\n{srt_time(start + s)} --> {srt_time(start + e)}\n{said}\n")
     narration = work / "narration.wav"
     sf.write(narration, track, rate, subtype="PCM_16")
     subtitles = work / "subtitles.srt"

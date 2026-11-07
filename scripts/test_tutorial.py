@@ -211,3 +211,29 @@ class Languages(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Names(unittest.TestCase):
+    """A function's own names never shadow the module's functions it calls
+    later: a loop variable `text` once hid `text()` and the video step
+    failed with "'str' object is not callable"."""
+
+    def test_no_local_name_hides_a_module_function(self):
+        import ast
+
+        source = Path(tutorial.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        functions = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+        hidden = []
+        for f in (n for n in tree.body if isinstance(n, ast.FunctionDef)):
+            bound = set()
+            for node in ast.walk(f):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                    bound.add(node.id)
+            called = {
+                node.func.id
+                for node in ast.walk(f)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            }
+            hidden += [f"{f.name}: {n}" for n in bound & called & functions]
+        self.assertEqual(hidden, [])
