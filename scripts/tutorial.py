@@ -5,10 +5,10 @@ A tutorial is `<tutorials>/<name>/script.yaml`: a title, a summary and
 steps, each with its text, what it does in the app and its picture. This
 script, for each tutorial named:
 
-1. speaks each step's text with Kokoro (`narrate.py`) or ElevenLabs
-   (`elevenlabs.py`, `--voice elevenlabs:<voice id>`) or Fish Audio S2 Pro
-   run locally (`fishspeech.py`, `--voice fish-s2-pro:<reference.wav>`),
-   each section kept in
+1. speaks each step's text, in the run's language (`--lang en|de`), with
+   Fish Audio S2 Pro run locally by mlx-speech (`fishspeech.py`, the
+   default), Kokoro (`narrate.py`, `--fast`) or ElevenLabs
+   (`elevenlabs.py`, `--voice elevenlabs:<voice id>`), each section kept in
    a cache and spoken again only when it changed, or, with `--no-voice`,
    guesses how long it would take; first, over the first step's card, the
    voice says that it is an AI voice and why (`voice_intro`);
@@ -18,8 +18,9 @@ script, for each tutorial named:
    without a window, drawn at 1920 × 1080 on the GPU, and takes its pictures
    itself (its `egui_screencast::Player`);
 4. copies the pictures to `<tutorials>/<name>/images/` and writes
-   `<tutorials>/<name>/README.md`;
-5. unless `--no-video`, makes `<tutorials>/<name>/<name>.mp4` with ffmpeg:
+   `<tutorials>/<name>/README.md` (`README.de.md` in German);
+5. unless `--no-video`, makes `<tutorials>/<name>/<name>.mp4` with ffmpeg
+   (`<name>.de.mp4` in German):
    the frames, the narration under them and the text as subtitles.
 
     python tutorial.py --app target/release/app [--app-arg ARG]… [--env K=V]…
@@ -28,16 +29,19 @@ script, for each tutorial named:
         [--voice elevenlabs:<voice id>] [--voice-model M] [--voice-setting K=V]…
         [--voice-cache DIR] [--dry-run] [--prune-voice-cache DAYS]
         [--app-name NAME] [--voice-intro TEXT | --no-voice-intro]
+        [--lang en|de|en,de] [--fast] [--engine E] [--voices DIR] [--fish-python PY]
 
 What is said and what is seen go together: an action `cue: "Open it"`
-waits until the narration says those words (Kokoro's times of its words),
+waits until the narration says those words (the times of its words, from
+Kokoro or ElevenLabs, or found by forced alignment for S2 Pro),
 and should the actions before it take longer, the words from there on wait
 instead. `shot: true` takes the step's picture there rather than at the
 step's end. The subtitles are the words spoken, when they are spoken. The
 voice is said to be synthetic on the cards, in a corner of the video, on
 the page and in the video's metadata (`voice_notice` in another language).
 
-In an `--app-arg`, `{work}` is the tutorial's work folder (an app's own
+In an `--app-arg` or `--env`, `{lang}` is the run's language. In an
+`--app-arg`, `{work}` is the tutorial's work folder (an app's own
 settings folder, say). Paths are taken from the folder it is run in. Without
 names, every tutorial is built. Work files are kept in `<work>/<name>/`.
 """
@@ -77,15 +81,69 @@ SHOT_WIDTH = 1600
 # metadata. A script in another language says it in its own
 # (`voice_notice`).
 VOICE_NOTICE = "Voice: AI-generated (Kokoro)"
+# The language of this run (`--lang`): what is said and written, and the
+# voice. A script's text in another language is `say: {en: …, de: …}` or
+# `say_de:` beside `say:`; a plain one is English.
+LANGS = ("en", "de")
+LANG = "en"
+# What the runner itself writes and says, in each language.
+STRINGS = {
+    "en": {
+        "notice": "Voice: AI-generated ({voice})",
+        "intro": "This video is narrated by an AI voice, so it can always show the current version of {app}.",
+        "the_app": "the app",
+        "needs": "You need",
+        "screencast": "**Screencast:** `{video}` beside this page, with narration, is built by "
+        "`make tutorial NAME={name}` (not in the repository, see [the index](../README.md)).",
+        "page_notice": "The screencast's narration is synthetic speech, made by {made_by} from the text "
+        "of this page; no person speaks it. The video says so on its first card and in a corner "
+        "throughout, its voice says so at its start, and its metadata says so too.",
+        "in_app": "In the app",
+        "pending": "For now through the assistant's tools.",
+        "next": "Next",
+        "subtitles": "eng",
+        "language": None,
+    },
+    "de": {
+        "notice": "Stimme: KI-generiert ({voice})",
+        "intro": "Dieses Video wird von einer KI-Stimme gesprochen, damit es immer die aktuelle Version von "
+        "{app} zeigen kann.",
+        "the_app": "der App",
+        "needs": "Du brauchst",
+        "screencast": "**Screencast:** `{video}` neben dieser Seite, mit Sprecherstimme, baut "
+        "`make tutorial NAME={name}` (nicht im Repository, siehe [die Übersicht](../README.md)).",
+        "page_notice": "Die Stimme des Screencasts ist synthetisch, erzeugt von {made_by} aus dem Text "
+        "dieser Seite; kein Mensch spricht sie. Das Video sagt es auf seiner ersten Karte und die "
+        "ganze Zeit in einer Ecke, seine Stimme sagt es zu Beginn, und seine Metadaten sagen es auch.",
+        "in_app": "In der App",
+        "pending": "Vorerst über die Werkzeuge des Assistenten.",
+        "next": "Weiter",
+        "subtitles": "deu",
+        "language": "German",
+    },
+}
+# The voices of Fish Audio S2 Pro by language (its voices.yaml), the default.
+FISH_VOICES = {"en": "en-gb-female", "de": "de-male"}
+# A Kokoro voice's name (am_michael, bf_emma): used by Kokoro only.
+KOKORO_NAME = re.compile(r"^[a-z][fm]_[a-z]+$")
+# Kokoro (`--fast`) instead of the engine chosen.
+FAST = False
 # The voice (`--voice`, else $SCREENCAST_VOICE, else the script's), the
 # ElevenLabs model and settings over the script's, and where ElevenLabs'
 # sections are kept: set from the command line in `main`.
 KOKORO_VOICE = "am_michael"
 # The names of Fish Audio S2 Pro, run locally (`fishspeech.py`).
 FISH_NAMES = ("fish-s2-pro", "fishaudio-s2-pro", "fishaudio")
-# The Python of the Fish venv (`--fish-python`, $FISH_SPEECH_PYTHON, else
-# <work>/fish-venv/bin/python).
+# The Python of mlx-speech (`--fish-python`, $FISH_SPEECH_PYTHON, else the
+# `mlx-speech` command's).
 FISH_PYTHON: Path | None = None
+# Fish S2 Pro's voices: a folder with a voices.yaml (`--voices`,
+# $SCREENCAST_VOICES, a script's `voices:`); the engine of a bare voice
+# (`--engine`, $SCREENCAST_ENGINE, a script's `engine:`).
+VOICES: str | None = None
+ENGINE: str | None = None
+# The user's own Hugging Face cache, before the runner sets its own.
+USER_HF_HOME = os.environ.get("HF_HOME")
 VOICE: str | None = None
 VOICE_MODEL: str | None = None
 VOICE_SETTINGS: dict = {}
@@ -94,7 +152,8 @@ VOICE_CACHE = WORK / "voices"
 # voice, and why (a script's `voice_intro`, `--voice-intro`; off only by
 # `voice_intro: false` or `--no-voice-intro`). `{app}` is the app's name.
 VOICE_INTRO_DEFAULT = "This video is narrated by an AI voice, so it can always show the current version of {app}."
-VOICE_INTRO: str | bool = VOICE_INTRO_DEFAULT
+# None: the default of the run's language.
+VOICE_INTRO: str | bool | None = None
 APP_NAME: str | None = None
 # Seconds of quiet between that line and the first step's words.
 INTRO_PAUSE = 0.6
@@ -120,6 +179,65 @@ def load(name: str) -> dict:
     return script
 
 
+def localized(value, lang: str):
+    """`value` in `lang`: a mapping of languages (`{en: …, de: …}`) its
+    entry (English when it has none for `lang`), `key_<lang>` beside `key`
+    in its place; the rest as it is."""
+    if isinstance(value, dict):
+        if value and all(k in LANGS for k in value):
+            return localized(value.get(lang, value.get("en")), lang)
+        out = {}
+        for k, v in value.items():
+            base, _, suffix = str(k).rpartition("_")
+            if base and suffix in LANGS:
+                continue
+            out[k] = localized(value.get(f"{k}_{lang}", v), lang)
+        for k, v in value.items():
+            base, _, suffix = str(k).rpartition("_")
+            if base and suffix == lang and base not in value:
+                out[base] = localized(v, lang)
+        return out
+    if isinstance(value, list):
+        return [localized(v, lang) for v in value]
+    return value
+
+
+def missing_text(script: dict, lang: str) -> list[int]:
+    """The steps with narration but none in `lang` (plain text is English)."""
+    out = []
+    for i, step in enumerate(script.get("steps", [])):
+        said = False
+        given = False
+        for key in ("say", "text"):
+            v = step.get(key)
+            if v is None and step.get(f"{key}_{lang}") is None:
+                continue
+            given = True
+            if step.get(f"{key}_{lang}") is not None:
+                said = True
+            elif isinstance(v, dict):
+                said = said or lang in v
+            elif lang == "en":
+                said = True
+        if given and not said:
+            out.append(i + 1)
+    return out
+
+
+def text(key: str, **kw) -> str:
+    """What the runner writes or says, in the run's language."""
+    return STRINGS[LANG][key].format(**kw)
+
+
+def suffix() -> str:
+    """Of the run's files: none for English, `.de` for German."""
+    return "" if LANG == "en" else f".{LANG}"
+
+
+def work_dir(name: str) -> Path:
+    return WORK / f"{name}{suffix()}"
+
+
 def plain(markdown: str) -> str:
     """Markdown as text: links, emphasis and code marks gone."""
     t = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", markdown)
@@ -130,8 +248,14 @@ def plain(markdown: str) -> str:
 
 
 def spoken(text: str) -> str:
-    """Text as Kokoro should read it: units and sizes spelled out."""
+    """Text as a voice should read it: units and sizes spelled out."""
     t = plain(text)
+    if LANG == "de":
+        t = re.sub(r"(\d)\s*mm\b", r"\1 Millimeter", t)
+        t = re.sub(r"(\d)\s*°", r"\1 Grad", t)
+        t = re.sub(r"\bM(\d)", r"M \1", t)
+        t = t.replace("×", "mal").replace("›", ",").replace("→", "zu")
+        return t.replace("JLCCNC", "JLC CNC")
     t = re.sub(r"(\d)\s*mm\b", r"\1 millimeters", t)
     t = re.sub(r"(\d)\s*°", r"\1 degrees", t)
     t = re.sub(r"\bM(\d)", r"M \1", t)
@@ -166,18 +290,34 @@ def guessed_words(text: str) -> list[dict]:
 
 
 def voice_choice(script: dict) -> tuple[str, str]:
-    """The backend and the voice: `--voice`, else `$SCREENCAST_VOICE`, else
+    """The engine and the voice: `--voice`, else `$SCREENCAST_VOICE`, else
     the script's `voice`, else Kokoro's am_michael. `elevenlabs:<voice id>`
-    is ElevenLabs, `fish-s2-pro:<reference.wav>` Fish Audio S2 Pro (run
-    locally), `kokoro:<voice>` or a bare name is Kokoro."""
-    choice = str(VOICE or os.environ.get("SCREENCAST_VOICE") or script.get("voice") or KOKORO_VOICE).strip()
+    is ElevenLabs, `fish-s2-pro:<voice>` Fish Audio S2 Pro (run locally),
+    `kokoro:<voice>` Kokoro; a bare voice is of `--engine`, else
+    `$SCREENCAST_ENGINE`, else the script's `engine`, else Kokoro."""
+    choice = str(VOICE or os.environ.get("SCREENCAST_VOICE") or script.get("voice") or "").strip()
     backend, sep, rest = choice.partition(":")
     backend = backend.lower()
     if sep and backend in ("elevenlabs", "kokoro", *FISH_NAMES):
         if not rest.strip():
             fail(f"voice {choice!r}: no voice after {backend}:")
-        return ("fish-s2-pro" if backend in FISH_NAMES else backend), rest.strip()
-    return "kokoro", choice
+        engine, choice = ("fish-s2-pro" if backend in FISH_NAMES else backend), rest.strip()
+    else:
+        engine = str(ENGINE or os.environ.get("SCREENCAST_ENGINE") or script.get("engine") or "fish-s2-pro")
+        engine = engine.strip().lower()
+        engine = "fish-s2-pro" if engine in FISH_NAMES else engine
+    if FAST:
+        engine = "kokoro"
+    if engine == "kokoro":
+        return "kokoro", choice if KOKORO_NAME.match(choice) else KOKORO_VOICE
+    if engine == "fish-s2-pro":
+        # A Kokoro voice in a script (voice: am_michael) is Kokoro's only.
+        return "fish-s2-pro", choice if choice and not KOKORO_NAME.match(choice) else FISH_VOICES[LANG]
+    if engine == "elevenlabs":
+        if not choice:
+            fail("ElevenLabs needs a voice: elevenlabs:<voice id>")
+        return "elevenlabs", choice
+    fail(f"engine {engine!r}: fish-s2-pro, kokoro or elevenlabs")
 
 
 class Kokoro:
@@ -197,6 +337,8 @@ class Kokoro:
         self.characters = 0
 
     def say(self, text: str) -> tuple[Path | None, float, list[dict]]:
+        # Kokoro would read delivery tags aloud.
+        text = elevenlabs.untagged(text)
         wav = WORK / "audio" / f"{self.kokoro.key(text, self.voice, self.speed)}.wav"
         words = self.kokoro.words(wav) if wav.exists() else None
         if words is not None:
@@ -223,6 +365,8 @@ def speaker_of(script: dict, dry_run: bool = False, opener=None) -> dict:
     backend, voice = voice_choice(script)
     speed = float(script.get("speed", 1.0))
     if backend == "kokoro":
+        if LANG != "en":
+            fail(f"Kokoro speaks no {LANG}: fish-s2-pro speaks it (without --fast)")
         return {
             "backend": "kokoro",
             "voice": voice,
@@ -238,21 +382,31 @@ def speaker_of(script: dict, dry_run: bool = False, opener=None) -> dict:
         settings = dict(fishspeech.SETTINGS)
         settings.update(script.get("voice_settings") or {})
         settings.update(VOICE_SETTINGS)
-        the_voice = fishspeech.Voice((ROOT / voice).resolve(), str(script.get("voice_reference_text") or ""), settings)
+        settings.setdefault("language", script.get("voice_language") or STRINGS[LANG]["language"])
+        voices = VOICES or os.environ.get("SCREENCAST_VOICES") or script.get("voices")
+        voices_dir = (ROOT / Path(str(voices)).expanduser()).resolve() if voices else None
+        the_voice = fishspeech.voice_of(voice, voices_dir, ROOT, settings)
         name = str(script.get("voice_name") or the_voice.name).strip()
-        python = FISH_PYTHON or WORK / "fish-venv" / "bin" / "python"
-        hf_home = os.environ.get("HF_HOME", str(WORK / "hf"))
+        python = FISH_PYTHON or fishspeech.mlx_python()
+        if not dry_run and (python is None or not Path(python).exists()):
+            fail(
+                "Fish Audio S2 Pro speaks by mlx-speech, which is not installed: "
+                "uv tool install --python 3.13 mlx-speech (and its model fish-s2-pro, by "
+                "mlx-speech tts --model fish-s2-pro …); or Kokoro, fast: --fast"
+            )
+        # Its model is in the user's own Hugging Face cache, not the runner's.
+        hf_home = {"HF_HOME": USER_HF_HOME}
         return {
             "backend": "fish-s2-pro",
             "voice": voice,
             "label": f"Fish Audio S2 Pro, {name}",
-            "made_by": f"Fish Audio S2 Pro, run locally from its open weights ({fishspeech.LICENCE}), "
-            f"in the voice of the reference recording {name}",
-            "made_by_md": f"Fish Audio S2 Pro, run locally from its open weights (licence: {fishspeech.LICENCE}; "
-            f"commercial use needs a licence from Fish Audio), in the voice of the reference recording {name}",
+            "made_by": f"Fish Audio S2 Pro, run locally with mlx-speech from its open weights "
+            f"({fishspeech.LICENCE}), voice {name} (cloned from a synthetic reference clip)",
+            "made_by_md": f"Fish Audio S2 Pro, run locally with mlx-speech from its open weights (licence: "
+            f"{fishspeech.LICENCE}; commercial use needs a licence from Fish Audio), voice `{name}`",
             "track": f"Fish Audio S2 Pro, {name}; {fishspeech.LICENCE}",
             "narrator": lambda: fishspeech.Narrator(
-                the_voice, VOICE_CACHE, fishspeech.Worker(python, {"HF_HOME": hf_home}), dry_run
+                the_voice, VOICE_CACHE, fishspeech.Worker(python, hf_home), dry_run
             ),
         }
     import urllib.request
@@ -300,11 +454,11 @@ def voice_intro(script: dict) -> str | None:
     turned off (`voice_intro: false`, or for every script
     `--no-voice-intro`)."""
     said = False if VOICE_INTRO is False else script.get("voice_intro", VOICE_INTRO)
-    if said is False or said is None:
+    if said is False:
         return None
-    if said is True:
-        said = VOICE_INTRO or VOICE_INTRO_DEFAULT
-    app = str(script.get("app") or APP_NAME or "the app").strip()
+    if said is None or said is True:
+        said = VOICE_INTRO or text("intro", app="{app}")
+    app = str(script.get("app") or APP_NAME or text("the_app")).strip()
     return spoken(str(said).replace("{app}", app)) or None
 
 
@@ -343,8 +497,8 @@ def narrate(name: str, script: dict, voice: bool, speaker: dict | None = None, n
             out.append(
                 {
                     "wav": None,
-                    "seconds": len(text.split()) / WORDS_PER_SECOND,
-                    "words": guessed_words(text),
+                    "seconds": len(elevenlabs.untagged(text).split()) / WORDS_PER_SECOND,
+                    "words": guessed_words(elevenlabs.untagged(text)),
                     "lead": 0,
                 }
             )
@@ -356,7 +510,7 @@ def narrate(name: str, script: dict, voice: bool, speaker: dict | None = None, n
         wav, seconds, words = narrator.say(intro)
         first = out[0]
         shift = seconds + INTRO_PAUSE
-        joined = WORK / name / "first-step.wav"
+        joined = work_dir(name) / "first-step.wav"
         if wav is not None and first["wav"] is not None:
             join_wavs([(wav, INTRO_PAUSE), (first["wav"], 0.0)], joined)
         elif wav is not None:
@@ -446,7 +600,7 @@ def voice_notice(script: dict, speaker: dict | None = None) -> str:
     own = script.get("voice_notice")
     if own:
         return str(own).replace("{voice}", label).strip()
-    return VOICE_NOTICE.replace("Kokoro", label)
+    return text("notice", voice=label)
 
 
 def plan(name: str, script: dict, audio, video: bool, voice: bool, speaker: dict | None = None) -> dict:
@@ -456,7 +610,7 @@ def plan(name: str, script: dict, audio, video: bool, voice: bool, speaker: dict
         steps.append(
             {
                 "name": step["name"],
-                "actions": absolute(actions, ROOT, WORK / name),
+                "actions": absolute(actions, ROOT, work_dir(name)),
                 "shot": shot_name(i, step),
                 "seconds": round(audio[i]["seconds"] + PAUSE, 3),
             }
@@ -473,7 +627,7 @@ def plan(name: str, script: dict, audio, video: bool, voice: bool, speaker: dict
 
 
 def play(name: str, the_plan: dict) -> dict:
-    work = WORK / name
+    work = work_dir(name)
     config = work / "config"
     shutil.rmtree(config, ignore_errors=True)
     config.mkdir(parents=True)
@@ -484,7 +638,8 @@ def play(name: str, the_plan: dict) -> dict:
     record = work / "recording"
     print(f"  playing {len(the_plan['steps'])} steps in the app", flush=True)
     env = dict(os.environ, **APP_ENV)
-    args = [a.replace("{work}", str(work)) for a in APP_ARGS]
+    args = [a.replace("{work}", str(work)).replace("{lang}", LANG) for a in APP_ARGS]
+    env.update({k: v.replace("{lang}", LANG) for k, v in APP_ENV.items()})
     run = subprocess.run(
         [APP, *args, "--play", path, "--record", record]
         + ([] if WINDOW else ["--headless"]),
@@ -500,13 +655,19 @@ def play(name: str, the_plan: dict) -> dict:
     return result
 
 
-def copy_shots(name: str, the_plan: dict) -> None:
-    images = DOCS / name / "images"
+def images_dir(script: dict) -> str:
+    """The pictures' folder: `images`, or `images.de` for a script whose app
+    is in that language too (`ui_languages: [en, de]`)."""
+    return f"images{suffix()}" if LANG in (script.get("ui_languages") or []) and LANG != "en" else "images"
+
+
+def copy_shots(name: str, the_plan: dict, script: dict | None = None) -> None:
+    images = DOCS / name / images_dir(script or {})
     shutil.rmtree(images, ignore_errors=True)
     images.mkdir(parents=True)
     for step in the_plan["steps"]:
         if step["shot"]:
-            shutil.copy(WORK / name / "recording" / "shots" / step["shot"], images / step["shot"])
+            shutil.copy(work_dir(name) / "recording" / "shots" / step["shot"], images / step["shot"])
 
 
 def srt_time(seconds: float) -> str:
@@ -577,7 +738,7 @@ def subtitles_of(words: list[dict], cues: list[tuple[float, float]]) -> list[tup
 def video(name: str, script: dict, audio, the_plan: dict, timeline: dict, speaker: dict | None = None) -> Path:
     if not shutil.which("ffmpeg"):
         fail("ffmpeg is missing (brew install ffmpeg), or build without video: --no-video")
-    work = WORK / name
+    work = work_dir(name)
     fps = timeline["fps"]
     # The narration: each step's audio from the step's first frame, its
     # words after a cue as much later as the cue came late; quiet to its
@@ -608,7 +769,7 @@ def video(name: str, script: dict, audio, the_plan: dict, timeline: dict, speake
     sf.write(narration, track, rate, subtype="PCM_16")
     subtitles = work / "subtitles.srt"
     subtitles.write_text("\n".join(srt), encoding="utf-8")
-    out = DOCS / name / f"{name}.mp4"
+    out = DOCS / name / f"{name}{suffix()}.mp4"
     voiced = "caption" in the_plan
     speaker = speaker or KOKORO_SPEAKER
     notice = voice_notice(script, speaker)
@@ -635,7 +796,8 @@ def video(name: str, script: dict, audio, the_plan: dict, timeline: dict, speake
         "-vf", f"fps={fps},scale={VIDEO_WIDTH}:-2:flags=lanczos,format=yuv420p",
         "-c:v", "libx264", "-preset", "slow", "-crf", "22", "-tune", "stillimage",
         "-c:a", "aac", "-b:a", "128k",
-        "-c:s", "mov_text", "-metadata:s:s:0", "language=eng",
+        "-c:s", "mov_text", "-metadata:s:s:0", f"language={text('subtitles')}",
+        "-metadata:s:a:0", f"language={text('subtitles')}",
         "-metadata", f"title={script['title']}",
         *disclosure,
         "-movflags", "+faststart",
@@ -658,39 +820,41 @@ def readme(name: str, script: dict, the_plan: dict, speaker: dict | None = None)
         "",
     ]
     if script.get("needs"):
-        lines += [f"**You need:** {script['needs'].strip()}", ""]
+        lines += [f"**{text('needs')}:** {script['needs'].strip()}", ""]
     lines += [
-        f"**Screencast:** `{name}.mp4` beside this page, with narration, is built by "
-        f"`make tutorial NAME={name}` (not in the repository, see [the index](../README.md)).",
+        text("screencast", video=f"{name}{suffix()}.mp4", name=name),
         "",
-        f"**{voice_notice(script, speaker)}.** The screencast's narration is synthetic speech, made by "
-        f"{speaker['made_by_md']} "
-        "from the text of this page; no person speaks it. The video says so on its first "
-        "card and in a corner throughout, and in its metadata.",
+        f"**{voice_notice(script, speaker)}.** " + text("page_notice", made_by=speaker["made_by_md"]),
         "",
     ]
     for i, (step, planned) in enumerate(zip(script["steps"], the_plan["steps"])):
         lines += [f"## {i + 1}. {step['title']}", "", step.get("text", "").strip(), ""]
         if step.get("ui"):
             lines += [
-                f"> In the app: {step['ui'].strip()}",
+                f"> {text('in_app')}: {step['ui'].strip()}",
                 "",
             ]
         if step.get("pending_ui"):
             lines += [
-                f"> **For now through the assistant's tools.** {step['pending_ui'].strip()}",
+                f"> **{text('pending')}** {step['pending_ui'].strip()}",
                 "",
             ]
         if planned["shot"]:
-            lines += [f"![{step['title']}](images/{planned['shot']})", ""]
+            lines += [f"![{step['title']}]({images_dir(script)}/{planned['shot']})", ""]
     if script.get("next"):
-        lines += ["## Next", "", script["next"].strip(), ""]
-    (DOCS / name / "README.md").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        lines += [f"## {text('next')}", "", script["next"].strip(), ""]
+    (DOCS / name / f"README{suffix()}.md").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
-def build(name: str, voice: bool, with_video: bool, dry_run: bool = False) -> None:
-    print(f"{name}:", flush=True)
-    script = load(name)
+def build(name: str, voice: bool, with_video: bool, dry_run: bool = False, lang: str = "en") -> None:
+    global LANG
+    LANG = lang
+    print(f"{name} ({lang}):", flush=True)
+    original = load(name)
+    missing = missing_text(original, lang)
+    if missing:
+        fail(f"{name}: no {lang} text in steps {', '.join(map(str, missing))} (say: {{en: …, {lang}: …}} or say_{lang}:)")
+    script = localized(original, lang)
     try:
         speaker = speaker_of(script, dry_run) if voice else None
         audio = narrate(name, script, voice, speaker)
@@ -700,13 +864,14 @@ def build(name: str, voice: bool, with_video: bool, dry_run: bool = False) -> No
         return
     the_plan = plan(name, script, audio, with_video, voice, speaker)
     timeline = play(name, the_plan)
-    copy_shots(name, the_plan)
+    copy_shots(name, the_plan, script)
     readme(name, script, the_plan, speaker)
     if with_video:
         out = video(name, script, audio, the_plan, timeline, speaker)
         seconds = timeline["frames"] / timeline["fps"]
         print(f"  {out.relative_to(ROOT)}: {seconds:.1f} s", flush=True)
-    print(f"  {(DOCS / name / 'README.md').relative_to(ROOT)}, {sum(1 for s in the_plan['steps'] if s['shot'])} pictures")
+    page = DOCS / name / f"README{suffix()}.md"
+    print(f"  {page.relative_to(ROOT)}, {sum(1 for s in the_plan['steps'] if s['shot'])} pictures")
 
 
 def main() -> None:
@@ -728,7 +893,7 @@ def main() -> None:
         "--voice",
         help="the voice, over the script's and $SCREENCAST_VOICE: a Kokoro voice (am_michael, "
         "kokoro:af_heart), elevenlabs:<voice id> (needs $ELEVENLABS_API_KEY) or "
-        "fish-s2-pro:<reference.wav> (local, non-commercial licence)",
+        "fish-s2-pro:<voice of voices.yaml, or a WAV> (local, non-commercial licence)",
     )
     p.add_argument("--voice-model", help="ElevenLabs' model (else $ELEVENLABS_MODEL, the script's voice_model, "
                    f"{'eleven_multilingual_v2'})")
@@ -736,8 +901,12 @@ def main() -> None:
                    help="a voice setting of ElevenLabs (stability=0.4, speed=1.05, …) or Fish (seed=7, …)")
     p.add_argument("--voice-cache", help="the cache of ElevenLabs' and Fish S2 Pro's sections (else "
                    "$SCREENCAST_VOICE_CACHE, <work>/voices)")
-    p.add_argument("--fish-python", help="the Python of the Fish venv (else $FISH_SPEECH_PYTHON, "
-                   "<work>/fish-venv/bin/python)")
+    p.add_argument("--fish-python", help="the Python of mlx-speech (else $FISH_SPEECH_PYTHON, else the "
+                   "mlx-speech command's)")
+    p.add_argument("--voices", help="Fish S2 Pro's voices: a folder with a voices.yaml (else $SCREENCAST_VOICES, "
+                   "the script's voices:)")
+    p.add_argument("--engine", help="the engine of a bare voice: kokoro, elevenlabs, fish-s2-pro (else "
+                   "$SCREENCAST_ENGINE, the script's engine:)")
     p.add_argument("--dry-run", action="store_true",
                    help="only count the sections not in the cache and the characters they would send")
     p.add_argument("--prune-voice-cache", type=float, metavar="DAYS",
@@ -745,9 +914,12 @@ def main() -> None:
     p.add_argument("--app-name", help="the app's name in the voice's own notice (a script's app: wins)")
     p.add_argument("--voice-intro", help="what the voice says first (a script's voice_intro: wins; {app} its name)")
     p.add_argument("--no-voice-intro", action="store_true", help="the voice does not say first that it is AI")
+    p.add_argument("--lang", default="en", help="the language(s) of the narration and the page: en, de or en,de "
+                   "(German: <name>.de.mp4, README.de.md)")
+    p.add_argument("--fast", action="store_true", help="Kokoro instead of Fish Audio S2 Pro: fast, English only")
     a = p.parse_args()
     global WINDOW, DOCS, WORK, APP, APP_ARGS, APP_ENV, VOICE, VOICE_MODEL, VOICE_SETTINGS, VOICE_CACHE
-    global APP_NAME, VOICE_INTRO, FISH_PYTHON
+    global APP_NAME, VOICE_INTRO, FISH_PYTHON, VOICES, ENGINE, FAST
     WINDOW = a.window
     DOCS = (ROOT / a.tutorials).resolve()
     WORK = (ROOT / a.work).resolve()
@@ -764,8 +936,15 @@ def main() -> None:
     VOICE_CACHE = (ROOT / cache).resolve() if cache else WORK / "voices"
     fish = a.fish_python or os.environ.get("FISH_SPEECH_PYTHON")
     FISH_PYTHON = (ROOT / fish).resolve() if fish else None
+    VOICES = a.voices
+    ENGINE = a.engine
     APP_NAME = a.app_name
-    VOICE_INTRO = False if a.no_voice_intro else (a.voice_intro or VOICE_INTRO_DEFAULT)
+    VOICE_INTRO = False if a.no_voice_intro else (a.voice_intro or None)
+    FAST = a.fast
+    langs = [x.strip() for x in a.lang.split(",") if x.strip()]
+    for lang in langs:
+        if lang not in LANGS:
+            fail(f"--lang {lang}: one of {', '.join(LANGS)}")
     if a.prune_voice_cache is not None:
         removed, size = elevenlabs.Cache(VOICE_CACHE).prune(a.prune_voice_cache)
         print(f"{VOICE_CACHE}: {removed} entries removed, {size / 1e6:.1f} MB")
@@ -778,8 +957,9 @@ def main() -> None:
     names = a.names or sorted(d.name for d in DOCS.iterdir() if (d / "script.yaml").exists())
     if not names:
         fail(f"no tutorials in {DOCS}")
-    for name in names:
-        build(name, voice=not a.no_voice, with_video=not a.no_video, dry_run=a.dry_run)
+    for lang in langs:
+        for name in names:
+            build(name, voice=not a.no_voice, with_video=not a.no_video, dry_run=a.dry_run, lang=lang)
 
 
 if __name__ == "__main__":

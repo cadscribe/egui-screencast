@@ -8,8 +8,15 @@ letter, and so each word, its frames. Words come out as Kokoro gives them:
 each word and each mark with when it starts and ends and whether a space
 follows, so cues and subtitles work alike.
 
-This module is the standard library only (the model runs in the Fish venv,
-`fishspeech_worker.py`); its tests need nothing installed.
+The path is found here with the standard library only, so its tests need
+nothing installed; `Aligner` runs the model (torch and transformers, in
+the tutorial venv already for Kokoro), downloaded from Hugging Face at a
+fixed revision on first use: wav2vec2-base-960h for English (Apache 2.0,
+about 380 MB), wav2vec2-base-10k-voxpopuli-ft-de for German (CC BY-NC 4.0,
+about 380 MB). Another language falls back to times by the words' lengths.
+
+Measured against Kokoro's own word times (it gives them) on Kokoro
+speech: see the README; a word's start is right to a frame or two.
 """
 
 import re
@@ -18,7 +25,23 @@ import re
 # other character that is not a space is a mark of its own.
 TOKEN = re.compile(r"[^\W_]+(?:['’.,\-][^\W_]+)*|[^\w\s]|_", re.UNICODE)
 
+# Delivery tags inline in square brackets ([pause], [excited], …): said to
+# the voice that knows them, never shown, never aligned.
+TAG = re.compile(r"\[[^\[\]]*\]")
+
+# The aligner of each language: a CTC model at a fixed revision, its word
+# separator, and the language for num2words.
+MODELS = {
+    "english": ("facebook/wav2vec2-base-960h", "22aad52d435eb6dbaf354bdad9b0da84ce7d6156", "en", "model.safetensors"),
+    "german": ("facebook/wav2vec2-base-10k-voxpopuli-ft-de", "1cbaf198475e1af97cc479ca081ce4ddd2d6b5cf", "de", "pytorch_model.bin"),
+}
+
 DIGITS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+
+
+def untagged(text: str) -> str:
+    """`text` without its delivery tags, its spaces single."""
+    return " ".join(TAG.sub(" ", text).split())
 
 
 def tokens_of(text: str) -> list[dict]:
@@ -41,7 +64,7 @@ def spelled(word: str, number_words=digits_spoken) -> str:
     with spaces between them. Empty for a mark."""
     w = word.lower().replace("’", "'")
     w = re.sub(r"\d+(?:\.\d+)?", lambda m: " " + number_words(m.group(0)) + " ", w)
-    w = re.sub(r"[^a-z' ]+", " ", w)
+    w = "".join(c if c.isalpha() or c in "' " else " " for c in w)
     return " ".join(w.split())
 
 
@@ -163,3 +186,55 @@ def by_length(text: str, seconds: float) -> list[dict]:
         out.append({"text": t["text"], "start": round(at, 3), "end": round(at + span, 3), "space": t["space"]})
         at += span
     return out
+
+
+class Aligner:
+    """The CTC model of a language, loaded on first use; `words(text, wav)`
+    the words of `text` with their times in the WAV."""
+
+    def __init__(self, language: str | None):
+        self.language = (language or "english").lower()
+        self.model = None
+
+    def known(self) -> bool:
+        return self.language in MODELS
+
+    def words(self, text: str, wav) -> list[dict]:
+        import wave as wavefile
+
+        with wavefile.open(str(wav), "rb") as w:
+            rate, frames = w.getframerate(), w.readframes(w.getnframes())
+        import numpy as np
+
+        audio = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
+        seconds = len(audio) / rate
+        text = untagged(text)
+        if not self.known():
+            return by_length(text, seconds)
+        import torch
+        from huggingface_hub import snapshot_download
+        from num2words import num2words
+        from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForCTC, Wav2Vec2CTCTokenizer
+
+        repo, revision, lang, weights = MODELS[self.language]
+        if self.model is None:
+            path = snapshot_download(repo, revision=revision, allow_patterns=["*.json", weights])
+            self.extractor = Wav2Vec2FeatureExtractor.from_pretrained(path)
+            self.tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(path)
+            self.model = Wav2Vec2ForCTC.from_pretrained(path).eval()
+        # To 16 kHz by the FFT: the whole clip at once.
+        n = round(len(audio) * 16_000 / rate)
+        x = np.fft.irfft(np.fft.rfft(audio)[: n // 2 + 1], n) * (n / len(audio))
+        inputs = self.extractor(x.astype(np.float32), sampling_rate=16_000, return_tensors="pt")
+        with torch.inference_mode():
+            emission = torch.log_softmax(self.model(inputs.input_values).logits[0], dim=-1).tolist()
+
+        def number_words(number: str) -> str:
+            try:
+                return num2words(float(number) if "." in number else int(number), lang=lang)
+            except Exception:
+                return digits_spoken(number)
+
+        vocab = self.tokenizer.get_vocab()
+        separator = self.tokenizer.word_delimiter_token or "|"
+        return align(text, emission, vocab, self.tokenizer.pad_token_id, separator, seconds, number_words)

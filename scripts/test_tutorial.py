@@ -1,6 +1,6 @@
 """Tests of the runner's timing: cues, the words they move, subtitles.
 
-    python3 -m unittest discover scripts
+    python -m unittest discover scripts   # with the venv's Python (PyYAML)
 """
 
 import sys
@@ -160,6 +160,53 @@ class VoiceIntro(unittest.TestCase):
         audio = tutorial.narrate("t", self.script, False)
         self.assertEqual(audio[0]["lead"], 0)
         self.assertEqual(audio[0]["words"][0]["text"], "It")
+
+
+class Languages(unittest.TestCase):
+    SCRIPT = {
+        "title": {"en": "A tray", "de": "Eine Schale"},
+        "summary": "English only.",
+        "card": {"title": "Tray", "title_de": "Schale", "points": [{"en": "Sketch", "de": "Skizze"}]},
+        "steps": [
+            {"name": "a", "say": {"en": "Open it.", "de": "Öffne sie."}, "actions": [{"click": {"ribbon": "Extrude"}}]},
+            {"name": "b", "say": "Next.", "say_de": "Weiter."},
+            {"name": "c", "shot": False},
+        ],
+    }
+
+    def test_a_script_in_each_language(self):
+        de = tutorial.localized(self.SCRIPT, "de")
+        self.assertEqual(de["title"], "Eine Schale")
+        self.assertEqual(de["summary"], "English only.")
+        self.assertEqual(de["card"], {"title": "Schale", "points": ["Skizze"]})
+        self.assertEqual([s.get("say") for s in de["steps"]], ["Öffne sie.", "Weiter.", None])
+        self.assertEqual(de["steps"][0]["actions"], [{"click": {"ribbon": "Extrude"}}])
+        en = tutorial.localized(self.SCRIPT, "en")
+        self.assertEqual([s.get("say") for s in en["steps"]], ["Open it.", "Next.", None])
+        self.assertNotIn("say_de", en["steps"][1])
+
+    def test_a_step_without_german_text_stops_a_german_build(self):
+        self.assertEqual(tutorial.missing_text(self.SCRIPT, "de"), [])
+        script = {"steps": [{"name": "a", "say": "Only English."}, {"name": "b", "text": {"de": "Nur Deutsch."}}]}
+        self.assertEqual(tutorial.missing_text(script, "de"), [1])
+        self.assertEqual(tutorial.missing_text(script, "en"), [2])
+
+    def test_german_files_notices_and_words(self):
+        with mock.patch.object(tutorial, "LANG", "de"), mock.patch.object(tutorial, "VOICE_INTRO", None), \
+                mock.patch.object(tutorial, "APP_NAME", "OpenSolve"):
+            self.assertEqual(tutorial.suffix(), ".de")
+            self.assertEqual(tutorial.work_dir("tray").name, "tray.de")
+            self.assertEqual(tutorial.spoken("8 mm, 90°"), "8 Millimeter, 90 Grad")
+            self.assertEqual(
+                tutorial.voice_intro({}),
+                "Dieses Video wird von einer KI-Stimme gesprochen, damit es immer die aktuelle Version "
+                "von OpenSolve zeigen kann.",
+            )
+            self.assertEqual(tutorial.voice_notice({}), "Stimme: KI-generiert (Kokoro)")
+            self.assertEqual(tutorial.images_dir({}), "images")
+            self.assertEqual(tutorial.images_dir({"ui_languages": ["en", "de"]}), "images.de")
+        self.assertEqual(tutorial.suffix(), "")
+        self.assertEqual(tutorial.voice_notice({}), "Voice: AI-generated (Kokoro)")
 
 
 if __name__ == "__main__":

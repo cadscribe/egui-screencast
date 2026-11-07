@@ -1,99 +1,104 @@
-"""Narration by Fish Audio S2 Pro, run locally from its open weights.
+"""Narration by Fish Audio S2 Pro, run locally with mlx-speech.
 
-The model runs in a venv of its own (fish-speech pins its own torch and
-transformers): `requirements-fish.txt`, installed with `--no-deps`, its
-Python given by `--fish-python` or `$FISH_SPEECH_PYTHON` (default
-`<work>/fish-venv/bin/python`). `fishspeech_worker.py` is started there
-once a run, on the first section not in the cache, loads the model (on
-Apple Silicon on the GPU by MPS) and speaks one section after another.
+S2 Pro (open weights, 8-bit for MLX: appautomaton/fishaudio-s2-pro-8bit-mlx,
+about 7 GB, about 10 GB of memory while it speaks) runs on Apple Silicon
+by mlx-speech, which the user installs (`uv tool install mlx-speech`, with
+its own Python); the runner neither installs nor downloads it. Its Python
+is found by the `mlx-speech` command on the PATH (its first line), or
+given: `--fish-python`, `$FISH_SPEECH_PYTHON`. `fishspeech_worker.py` is
+started there once a run, on the first section not in the cache, and
+speaks one section after another (5 to 7 times slower than the speech).
 
-S2 Pro speaks in the voice of a **reference recording**: a WAV of 10 to 30
-seconds and what is said in it (beside it as `.lab` or `.txt`, or the
-script's `voice_reference_text`). Without one each section would have
-another voice. Use a voice you may use: your own, one that is licensed, or
-one made by another synthetic voice (Kokoro's, say).
+**A voice** is a reference recording and its exact transcript, in the
+language of the text: S2 Pro has no preset voices, and a seed alone is
+not one. Voices come from a `voices.yaml` (`--voices DIR`,
+`$SCREENCAST_VOICES`, a script's `voices:`):
 
-S2 Pro gives no times of its words; they are found by forced alignment
-(`align.py`, wav2vec2-base-960h, English).
+    dir: fish-s2-pro
+    voices:
+      en-gb-female: {language: English, reference: en-gb-female.wav, transcript: "…"}
 
-**Licence:** S2 Pro's weights are under the Fish Audio Research License:
-research and non-commercial use only; commercial use needs a licence from
-Fish Audio (business@fish.audio). The notices say so.
+or the voice is a WAV's path, its words beside it (`.lab`, `.txt`). A
+fixed seed makes a section sound the same each time.
 
-Each section is kept in the cache by a key of everything that makes its
-sound, as for ElevenLabs (`elevenlabs.Cache`); it saves minutes of compute
-a section.
+**Tags** in square brackets steer the delivery ([pause], [excited],
+[emphasis], [whisper]); S2 Pro gets them, the subtitles and the alignment
+do not.
+
+**Word times**: S2 Pro gives none; `align.Aligner` finds them by forced
+alignment, in the tutorial venv.
+
+**Licence:** the Fish Audio Research License: research and non-commercial
+use only (no monetised channel, no sponsorship); commercial use needs a
+licence from Fish Audio. The notices say so.
 """
 
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from elevenlabs import Cache, SpeechError, normalized, wav_seconds
+from align import Aligner, untagged
+from elevenlabs import Cache, SpeechError, wav_seconds
 
 BACKEND = "fish-s2-pro"
-MODEL = "fishaudio/s2-pro"
-# The revisions the worker loads (`fishspeech_worker.py`), in the key.
-REVISION = "1de9996b6be38b745688de084d87a5633f714e4e"
-FISH_SPEECH = "0f8a12e8a651062fdee9c33a894bdccd3a8513f1"
-ALIGNER = "facebook/wav2vec2-base-960h@22aad52d435eb6dbaf354bdad9b0da84ce7d6156"
+MODEL = "appautomaton/fishaudio-s2-pro-8bit-mlx"
 OUTPUT_FORMAT = "wav_24000"
-# A fixed seed: the same text, the same sound.
-SETTINGS = {"seed": 42, "temperature": 0.7, "top_p": 0.7, "chunk_length": 200, "normalize": True}
-LICENCE = "Fish Audio Research License, non-commercial use"
+SETTINGS = {"seed": 1}
+LICENCE = "Fish Audio Research License, non-commercial use only"
 CACHE_FORMAT = 1
 WORKER = Path(__file__).with_name("fishspeech_worker.py")
 
 
+def normalized(text: str) -> str:
+    """The text as sent and keyed: its tags kept, its spaces single."""
+    return " ".join(text.split())
+
+
 @dataclass
 class Voice:
-    """A reference recording and the settings."""
+    """A reference recording, its transcript and language, and the seed."""
 
+    name: str
     reference: Path
-    reference_text: str = ""
+    transcript: str
+    language: str | None = None
     settings: dict = field(default_factory=lambda: dict(SETTINGS))
+    engine: str = "mlx-speech"
 
     def __post_init__(self):
         self.reference = Path(self.reference)
         if not self.reference.is_file():
-            raise SpeechError(
-                f"Fish S2 Pro: the reference recording {self.reference} is missing "
-                "(fish-s2-pro:<a WAV of 10 to 30 s>, its words beside it as .lab or .txt)"
-            )
-        if not self.reference_text:
-            for suffix in (".lab", ".txt"):
-                side = self.reference.with_suffix(suffix)
-                if side.is_file():
-                    self.reference_text = side.read_text(encoding="utf-8").strip()
-                    break
-        if not self.reference_text:
-            raise SpeechError(
-                f"Fish S2 Pro: what is said in {self.reference} is missing: write it to "
-                f"{self.reference.with_suffix('.lab')} or give voice_reference_text"
-            )
+            raise SpeechError(f"Fish S2 Pro: the reference recording {self.reference} of {self.name} is missing")
+        if not self.transcript.strip():
+            raise SpeechError(f"Fish S2 Pro: the transcript of {self.reference} is missing")
         self.reference_hash = hashlib.sha256(self.reference.read_bytes()).hexdigest()
 
     @property
-    def name(self) -> str:
-        return self.reference.stem
+    def generation_language(self) -> str | None:
+        """What S2 Pro is told: nothing for English (as the references
+        were made), else the language's name."""
+        if not self.language or self.language.lower() == "english":
+            return None
+        return self.language
 
     def key(self, text: str) -> str:
-        """A hash of the backend, the model and code at their revisions, the
-        aligner, the reference (its bytes and words), the settings, the
-        output format and the text as said."""
+        """A hash of the backend, the engine and model, the reference (its
+        bytes and transcript), the language, the seed, the output format
+        and the text as said (tags and all)."""
         material = json.dumps(
             {
                 "format": CACHE_FORMAT,
                 "backend": BACKEND,
-                "model": f"{MODEL}@{REVISION}",
-                "fish_speech": FISH_SPEECH,
-                "aligner": ALIGNER,
+                "engine": self.engine,
+                "model": MODEL,
                 "reference": self.reference_hash,
-                "reference_text": normalized(self.reference_text),
+                "transcript": " ".join(self.transcript.split()),
+                "language": self.generation_language,
                 "settings": self.settings,
                 "output_format": OUTPUT_FORMAT,
                 "text": normalized(text),
@@ -104,26 +109,86 @@ class Voice:
         return hashlib.sha256(material.encode()).hexdigest()[:24]
 
 
-class Worker:
-    """`fishspeech_worker.py` in the Fish venv: started on the first
-    request, asked one section at a time."""
+def voice_of(spec: str, voices_dir: Path | None, base: Path, settings: dict) -> Voice:
+    """The voice named `spec` in `voices_dir/voices.yaml`, or the WAV at
+    `spec` with its transcript beside it."""
+    path = (base / spec).resolve()
+    if spec.lower().endswith(".wav") or path.is_file():
+        transcript = ""
+        for suffix in (".lab", ".txt"):
+            side = path.with_suffix(suffix)
+            if side.is_file():
+                transcript = side.read_text(encoding="utf-8").strip()
+                break
+        if not transcript:
+            raise SpeechError(f"Fish S2 Pro: what is said in {path} is missing: write it to {path.with_suffix('.lab')}")
+        return Voice(path.stem, path, transcript, settings.get("language"), {"seed": settings.get("seed", 1)})
+    if voices_dir is None:
+        raise SpeechError(
+            f"Fish S2 Pro: the voice {spec!r} is not a WAV, and no voices.yaml is given "
+            "(--voices DIR, $SCREENCAST_VOICES or the script's voices:)"
+        )
+    import yaml
 
-    def __init__(self, python: Path, env: dict | None = None, command: list[str] | None = None):
-        self.python = Path(python)
-        self.env = env
+    index = Path(voices_dir) / "voices.yaml"
+    try:
+        listed = yaml.safe_load(index.read_text(encoding="utf-8")) or {}
+    except OSError as e:
+        raise SpeechError(f"Fish S2 Pro: {index} cannot be read ({e.strerror})") from None
+    except yaml.YAMLError as e:
+        where = getattr(e, "problem_mark", None)
+        at = f" at line {where.line + 1}, column {where.column + 1}" if where else ""
+        raise SpeechError(f"Fish S2 Pro: {index} is not valid YAML{at}: {getattr(e, 'problem', e)}") from None
+    entry = (listed.get("voices") or {}).get(spec)
+    if not entry:
+        known = ", ".join(sorted(listed.get("voices") or {}))
+        raise SpeechError(f"Fish S2 Pro: no voice {spec!r} in {index} (there are: {known})")
+    folder = Path(voices_dir) / str(listed.get("dir") or ".")
+    return Voice(
+        spec,
+        folder / entry["reference"],
+        str(entry.get("transcript") or ""),
+        settings.get("language") or entry.get("language"),
+        {"seed": settings.get("seed", 1)},
+    )
+
+
+def mlx_python() -> Path | None:
+    """The Python of the `mlx-speech` command on the PATH (its first line)."""
+    command = shutil.which("mlx-speech") or str(Path.home() / ".local" / "bin" / "mlx-speech")
+    try:
+        first = Path(command).read_text(encoding="utf-8", errors="replace").splitlines()[0]
+    except (OSError, IndexError):
+        return None
+    return Path(first[2:].strip()) if first.startswith("#!") else None
+
+
+class Worker:
+    """`fishspeech_worker.py` in mlx-speech's Python: started on the first
+    request, asked one section at a time; offline, so that it never
+    downloads the model."""
+
+    def __init__(self, python: Path | None, env: dict | None = None, command: list[str] | None = None):
+        self.python = python
+        self.env = env or {}
         self.command = command
         self.process: subprocess.Popen | None = None
 
     def start(self) -> None:
-        if self.command is None and not self.python.exists():
+        if self.command is None and (self.python is None or not Path(self.python).exists()):
             raise SpeechError(
-                f"Fish S2 Pro: no Python at {self.python}: make its venv "
-                "(uv venv -p 3.12 <work>/fish-venv && VIRTUAL_ENV=<work>/fish-venv uv pip install "
-                "--no-deps -r requirements-fish.txt), or say where it is: --fish-python"
+                "Fish S2 Pro: mlx-speech is not installed (uv tool install mlx-speech, then its model "
+                "fish-s2-pro by mlx-speech tts --model fish-s2-pro …), or say where its Python is: "
+                "--fish-python"
             )
         command = self.command or [str(self.python), str(WORKER)]
-        env = dict(os.environ, **(self.env or {}))
-        # Its log (loading, downloading) on our stderr, its answers on a pipe.
+        env = dict(os.environ)
+        for k, v in self.env.items():
+            if v is None:
+                env.pop(k, None)
+            else:
+                env[k] = v
+        env["HF_HUB_OFFLINE"] = "1"
         self.process = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env, bufsize=1
         )
@@ -158,15 +223,17 @@ class Worker:
 
 
 class Narrator:
-    """Speaks sections with S2 Pro through the cache, and counts: how many
-    from the cache, how many spoken, their characters and seconds."""
+    """Speaks sections with S2 Pro through the cache, finds their words'
+    times, and counts: how many from the cache, how many spoken, their
+    characters and seconds."""
 
     label = "Fish Audio S2 Pro"
 
-    def __init__(self, voice: Voice, cache: Path, worker, dry_run: bool = False):
+    def __init__(self, voice: Voice, cache: Path, worker, dry_run: bool = False, aligner=None):
         self.voice = voice
         self.cache = Cache(cache)
         self.worker = worker
+        self.aligner = aligner or Aligner(voice.language)
         self.dry_run = dry_run
         self.cached = 0
         self.spoken = 0
@@ -183,20 +250,21 @@ class Narrator:
             wav, words = hit
             return wav, wav_seconds(wav), words
         self.spoken += 1
-        self.characters += len(text)
+        self.characters += len(untagged(text))
         if self.dry_run:
             return None, 0.0, []
         print(f"  {self.label}: {text[:60]}…", flush=True)
         started = time.time()
-        out = self.cache.root / f".{key}.{os.getpid()}.wav"
         self.cache.root.mkdir(parents=True, exist_ok=True)
+        out = self.cache.root / f".{key}.{os.getpid()}.wav"
         try:
-            answer = self.worker(
+            self.worker(
                 {
                     "text": text,
                     "out": str(out),
                     "reference_audio": str(self.voice.reference.resolve()),
-                    "reference_text": self.voice.reference_text,
+                    "reference_text": self.voice.transcript,
+                    "language": self.voice.generation_language,
                     **self.voice.settings,
                 }
             )
@@ -206,26 +274,29 @@ class Narrator:
                 if w.getframerate() != 24_000 or w.getsampwidth() != 2 or w.getnchannels() != 1:
                     raise SpeechError("Fish S2 Pro: the worker's audio is not 16-bit mono at 24 kHz")
                 pcm = w.readframes(w.getnframes())
+            words = self.aligner.words(text, out)
         finally:
             out.unlink(missing_ok=True)
         self.compute += time.time() - started
         wav = self.cache.put(
             key,
             pcm,
-            answer["words"],
+            words,
             {
                 "text": text,
                 "backend": BACKEND,
-                "model": f"{MODEL}@{REVISION}",
+                "model": MODEL,
+                "voice": self.voice.name,
                 "reference": str(self.voice.reference),
+                "language": self.voice.language,
                 "settings": self.voice.settings,
-                "characters": len(text),
+                "characters": len(untagged(text)),
                 "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
             },
         )
         seconds = wav_seconds(wav)
         self.seconds += seconds
-        return wav, seconds, answer["words"]
+        return wav, seconds, words
 
     def report(self) -> str:
         total = self.cached + self.spoken

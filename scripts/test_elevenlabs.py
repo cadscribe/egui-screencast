@@ -1,7 +1,7 @@
 """Tests of the ElevenLabs narration and its cache, against a fake API:
 nothing here asks the real ElevenLabs (each call costs money).
 
-    python3 -m unittest discover scripts
+    python -m unittest discover scripts   # with the venv's Python (PyYAML)
 """
 
 import base64
@@ -204,6 +204,9 @@ class Choice(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         patches = [
             mock.patch.object(tutorial, "VOICE", None),
+            mock.patch.object(tutorial, "ENGINE", None),
+            mock.patch.object(tutorial, "FAST", False),
+            mock.patch.object(tutorial, "LANG", "en"),
             mock.patch.object(tutorial, "VOICE_MODEL", None),
             mock.patch.object(tutorial, "VOICE_SETTINGS", {}),
             mock.patch.object(tutorial, "VOICE_CACHE", Path(self.tmp.name)),
@@ -220,7 +223,8 @@ class Choice(unittest.TestCase):
 
     def test_the_command_line_then_the_environment_then_the_script(self):
         script = {"voice": "am_michael"}
-        self.assertEqual(tutorial.voice_choice(script), ("kokoro", "am_michael"))
+        with mock.patch.object(tutorial, "FAST", True):
+            self.assertEqual(tutorial.voice_choice(script), ("kokoro", "am_michael"))
         with mock.patch.dict(os.environ, {"SCREENCAST_VOICE": "elevenlabs:env"}):
             self.assertEqual(tutorial.voice_choice(script), ("elevenlabs", "env"))
             with mock.patch.object(tutorial, "VOICE", "elevenlabs:cli"):

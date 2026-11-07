@@ -58,23 +58,46 @@ card:
 ## The runner
 
 `scripts/tutorial.py` builds `<tutorials>/<name>/script.yaml` into the
-plan, speaks the narration with Kokoro (`scripts/narrate.py`, pinned in
-`scripts/requirements.txt`, Python 3.12) or ElevenLabs (below), plays it
-in the app and writes `images/`, `README.md` and `<name>.mp4` (ffmpeg):
+plan, speaks the narration (Fish Audio S2 Pro by default, Kokoro with
+`--fast`, or ElevenLabs; below), plays it in the app and writes `images/`,
+`README.md` and `<name>.mp4` (ffmpeg), in English and, with `--lang de`,
+in German (`README.de.md`, `<name>.de.mp4`):
 
     python scripts/tutorial.py --app target/release/app \
         [--app-arg ARG]… [--env K=V]… [--tutorials docs/tutorials] \
         [--no-voice] [--no-video] [--window] [--app-name NAME] \
-        [--voice elevenlabs:<voice id>] [--dry-run] [NAME…]
+        [--lang en|de|en,de] [--fast] [--voices DIR] [--voice V] [--dry-run] [NAME…]
 
-## Voices: Kokoro, ElevenLabs or Fish Audio S2 Pro
+Tests: `python -m unittest discover scripts` with the venv's Python
+(PyYAML); no model is loaded, no paid API called.
 
-Kokoro is the default: local, free, the model at a fixed revision. The
-voice is chosen by `--voice`, else `$SCREENCAST_VOICE`, else the script's
-`voice:`; a bare name (`am_michael`) or `kokoro:<name>` is Kokoro,
-`elevenlabs:<voice id>` is ElevenLabs, `fish-s2-pro:<reference.wav>` is
-Fish Audio S2 Pro run locally (below):
+## Two languages
 
+A run speaks and writes one language or several (`--lang en,de`). A
+script gives a text in each: `say: {en: "…", de: "…"}`, or `say_de:`
+beside `say:` (any key: `title_de`, `text_de`, a card's `title_de`, …); a
+plain text is English, and a step with narration but none in the run's
+language stops the build. German files are `<name>.de.mp4` and
+`README.de.md`, the work in `<work>/<name>.de/`; the pictures stay in
+`images/` unless the script says the app speaks the language too
+(`ui_languages: [en, de]`, then `images.de/`; `{lang}` in an `--app-arg`
+or `--env` tells the app). Units are spelled for the voice in each
+language ("8 Millimeter"), and the runner's own words (the notices, the
+page's lines) are German too.
+
+## Voices: Fish Audio S2 Pro, Kokoro or ElevenLabs
+
+The engine is Fish Audio S2 Pro (below) unless `--fast` (Kokoro), or
+`--engine`, `$SCREENCAST_ENGINE` or the script's `engine:` says otherwise.
+The voice is `--voice`, else `$SCREENCAST_VOICE`, else the script's
+`voice:` (`voice_de:` for German), else by the language: `en-gb-female`
+for English, `de-male` for German. `kokoro:<name>`,
+`elevenlabs:<voice id>` or `fish-s2-pro:<voice>` name the engine too; a
+Kokoro voice in a script (`voice: am_michael`) is used by Kokoro only.
+Kokoro speaks English only.
+
+    python scripts/tutorial.py --app … --fast                     # Kokoro: quick, English
+    python scripts/tutorial.py --app … --voices ~/tts-voices --lang en,de
     export ELEVENLABS_API_KEY=…            # elevenlabs.io → Developers → API keys
     python scripts/elevenlabs.py voices    # your voices and their ids (costs nothing)
     python scripts/tutorial.py --app … --voice elevenlabs:<voice id> --dry-run   # what it would cost
@@ -107,7 +130,7 @@ folder (`audio.wav`, `words.json`, `meta.json`) made whole and then renamed
 into place, so a failed request (no key, HTTP 401, 429, …) leaves nothing
 behind, and the sections spoken before it are kept. It lives in
 `<work>/voices` (`--voice-cache DIR`, `$SCREENCAST_VOICE_CACHE`), with
-Fish S2 Pro's (their keys say which backend),
+Fish S2 Pro's (their keys say which engine),
 beside Kokoro's model in `<work>/hf` and Kokoro's sections in
 `<work>/audio`.
 
@@ -126,63 +149,72 @@ ElevenLabs.
 
 ### Fish Audio S2 Pro, run locally
 
-[S2 Pro](https://huggingface.co/fishaudio/s2-pro) (5B parameters, open
-weights) runs on the computer, on Apple Silicon on the GPU by MPS, else
-the CPU: nothing is sent anywhere, nothing is billed, but it is slow and
-needs memory (the weights are about 11 GB in bf16; 32 GB of RAM or more).
-On an M1 Max (64 GB, busy with other work) loading took 3 minutes and a
-sentence of 7.5 s took 107 s (1.5 tokens a second, about 14 times the
-speech's length): an hour or more for a tutorial the first time. Every
-section is cached like ElevenLabs' (the key: backend, model and
-fish-speech at their revisions, the aligner, the reference recording's
-bytes and words, the settings, the output format, the text), so only
-what changed is spoken again.
+[S2 Pro](https://huggingface.co/fishaudio/s2-pro) speaks on the Mac
+itself, by [mlx-speech](https://pypi.org/project/mlx-speech/) on Apple
+Silicon (its 8-bit model, appautomaton/fishaudio-s2-pro-8bit-mlx, about
+7 GB, about 10 GB of memory while it speaks). Nothing is sent, nothing is
+billed. **The runner neither installs nor downloads it**: install it
+yourself, in its own Python, and fetch its model once:
+
+    uv tool install --python 3.13 mlx-speech      # 0.5.6 tested
+    mlx-speech tts --model fish-s2-pro --text "Hello." -o /tmp/hello.wav
+
+The runner finds its Python by the `mlx-speech` command
+(`--fish-python`, `$FISH_SPEECH_PYTHON` otherwise) and starts
+`scripts/fishspeech_worker.py` there once a run, offline
+(`HF_HUB_OFFLINE=1`, the user's own Hugging Face cache), on the first
+section not in the cache. Without mlx-speech it stops and says how to
+install it, or to use `--fast`; it never switches to Kokoro by itself.
 
 **Licence.** S2 Pro's weights are under the **Fish Audio Research
-License: research and non-commercial use only**; commercial use needs a
-licence from Fish Audio (business@fish.audio). Whether a tutorial video
-is non-commercial is yours to judge. The notices say it: the card line
-and corner name `Fish Audio S2 Pro`, the page names the licence, the
-MP4's comment and its sound's title too. The aligner
-(facebook/wav2vec2-base-960h) is Apache 2.0.
+License: research and non-commercial use only** (no monetised channel, no
+sponsorship); commercial use needs a licence from Fish Audio
+(business@fish.audio). The weights must not be redistributed: they are
+never in a repository or a release. The notices say it: the card line and
+the corner name `Fish Audio S2 Pro`, the page and the MP4's comment and
+sound title name the licence.
 
-**Its venv.** fish-speech pins its own torch (2.8.0) and transformers, so
-it gets a venv of its own beside the tutorial one, from
-`scripts/requirements-fish.txt` (fish-speech's own lock at a fixed commit,
-installed without resolving again):
+**Voices.** S2 Pro has no preset voices, and a seed alone is not a voice
+(the same seed gives another speaker for another text). A voice is a
+reference clip and its exact transcript, in the language of the text,
+listed in a `voices.yaml` (`--voices DIR`, `$SCREENCAST_VOICES`, the
+script's `voices:`):
 
-    uv venv -p 3.12 target/tutorials/fish-venv
-    VIRTUAL_ENV=target/tutorials/fish-venv uv pip install --no-deps -r scripts/requirements-fish.txt
+```yaml
+dir: fish-s2-pro
+voices:
+  en-gb-female: {language: English, reference: en-gb-female.wav, transcript: "In this tutorial, …"}
+  de-male:      {language: German,  reference: de-male.wav,      transcript: "In diesem Tutorial …"}
+```
 
-The runner starts `scripts/fishspeech_worker.py` with that Python
-(`--fish-python`, `$FISH_SPEECH_PYTHON`, else
-`<work>/fish-venv/bin/python`) on the first section not in the cache; it
-loads the model once (from Hugging Face on first use, into `<work>/hf`)
-and speaks one section after the other.
+or a WAV's path with its transcript beside it (`.lab`). A German voice is
+told `--language German`. A fixed seed (`voice_settings: {seed: 1}`)
+makes a section sound the same each time.
 
-**The voice** is a reference recording: a WAV of 10 to 30 seconds, and
-what is said in it beside it (`narrator.lab` or `.txt`, or the script's
-`voice_reference_text`). Without one S2 Pro would choose another voice for
-each section. Use a voice you may use: your own, a licensed one, or one
-made by Kokoro:
+**Tags** in square brackets steer the delivery: `[pause]`, `[excited]`,
+`[emphasis]`, `[whisper]` (no closing tag). S2 Pro gets them; the
+subtitles, the cues and the alignment do not, and Kokoro and ElevenLabs
+never hear them.
 
-    python scripts/narrate.py "Hello, I am the narrator of these tutorials. …" voices/narrator.wav
-    echo "Hello, I am the narrator of these tutorials. …" > voices/narrator.lab
-    python scripts/tutorial.py --app … --voice fish-s2-pro:voices/narrator.wav
+**Time.** On an M1 Max two new sentences (11.5 s of speech) took 33 s
+with loading; reckon 3 to 7 times the speech's length. Every section is
+kept in the cache (`<work>/voices`) by a key of the engine, the model, the
+reference (its bytes and transcript), the language, the seed, the output
+format and the text with its tags; only what changed is spoken again.
 
-`voice_settings:` (or `--voice-setting K=V`) sets `seed` (42: the same
-text, the same sound), `temperature`, `top_p` (0.7 each), `chunk_length`
-(200) and `normalize` (true). The script's `speed` does not apply.
-
-**Word times.** S2 Pro run locally gives none. They are found by forced
-alignment (`scripts/align.py`): wav2vec2-base-960h (English letters, a
-frame each 20 ms) says how likely each letter is in each frame of the
-speech, and the most likely path through the text's letters in order gives
-each word its first and last frame; numbers are spelled for it
-(num2words). A word's start is right to about a frame or two (20 to
-40 ms), which is far finer than a cue needs. Should the path not be found
-(a text not in English, say), the times are spread by the words' lengths,
-and cues are then only roughly right.
+**Word times.** S2 Pro gives none; they are found by forced alignment in
+the tutorial venv (`scripts/align.py`): a CTC model of the language's
+letters (wav2vec2-base-960h for English, Apache 2.0;
+wav2vec2-base-10k-voxpopuli-ft-de for German, CC BY-NC 4.0; about 380 MB
+each, from Hugging Face on first use at fixed revisions) says how likely
+each letter is in each 20 ms frame, and the most likely path through the
+text's letters in order gives each word its frames; numbers are spelled
+for it (num2words). Against Kokoro's own word times on Kokoro speech
+(72 words) the aligned starts are a steady 73 ms later (CTC fires a
+little after a word's onset), within 95 ms for 90 % of the words and
+203 ms at most; the ends agree to a median of 22 ms. A cue thus comes a
+few hundredths of a second after its word begins, as with Kokoro. Another
+language falls back to times by the words' lengths.
 
 ## What is said with what is seen
 

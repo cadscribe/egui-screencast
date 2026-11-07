@@ -34,6 +34,8 @@ import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from align import untagged
+
 API = "https://api.elevenlabs.io"
 KEY_ENV = "ELEVENLABS_API_KEY"
 # The model when none is given: ElevenLabs' default, timestamps and all.
@@ -85,8 +87,9 @@ class Voice:
 
 
 def normalized(text: str) -> str:
-    """The text as it is sent and as it is keyed."""
-    return " ".join(text.split())
+    """The text as it is sent and as it is keyed: delivery tags ([pause])
+    are Fish S2 Pro's, gone here."""
+    return untagged(text)
 
 
 def setting(value: str):
