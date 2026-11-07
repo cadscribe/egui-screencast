@@ -2,6 +2,7 @@
 # and what they need, pinned as installed and tested with Python 3.12 on macOS
 # (arm64). `make tutorial-venv` installs them into target/tutorials/venv. The
 # model and its voices come from Hugging Face at the revision in narrate.py.
+# ElevenLabs (elevenlabs.py) needs nothing more: the standard library only.
 addict==2.4.0
 annotated-doc==0.0.5
 annotated-types==0.8.0
