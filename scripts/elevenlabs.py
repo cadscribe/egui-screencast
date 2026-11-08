@@ -9,7 +9,8 @@ and ends and whether a space follows, so cues and subtitles work the same.
 
 ElevenLabs bills by the characters sent. Each text section is kept in the
 cache by a key of everything that makes its sound (backend, voice, model,
-voice settings, output format, the text as said); a section whose key is
+voice settings, output format, the language when one is given, the text as
+said); a section whose key is
 in the cache is never asked for again. An entry is a folder made whole and
 then renamed into place, so a failed request leaves nothing behind.
 
@@ -65,25 +66,37 @@ class Voice:
     model_id: str = MODEL
     settings: dict = field(default_factory=lambda: dict(SETTINGS))
     output_format: str = OUTPUT_FORMAT
+    # The language the model is told the text is in (ISO 639-1, "de"),
+    # sent as the request's `language_code`; None: the model guesses it.
+    language_code: str | None = None
 
     def key(self, text: str) -> str:
         """The cache key of `text` said by this voice: a hash of the backend,
-        the voice, the model, the settings, the output format and the text
-        as said (whitespace made single spaces)."""
-        material = json.dumps(
-            {
-                "format": CACHE_FORMAT,
-                "backend": "elevenlabs",
-                "voice_id": self.voice_id,
-                "model_id": self.model_id,
-                "settings": self.settings,
-                "output_format": self.output_format,
-                "text": normalized(text),
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        )
-        return hashlib.sha256(material.encode()).hexdigest()[:24]
+        the voice, the model, the settings, the output format, the language
+        (only when one is given, so that the sections of a voice without
+        one keep their keys) and the text as said (whitespace made single
+        spaces)."""
+        material = {
+            "format": CACHE_FORMAT,
+            "backend": "elevenlabs",
+            "voice_id": self.voice_id,
+            "model_id": self.model_id,
+            "settings": self.settings,
+            "output_format": self.output_format,
+            "text": normalized(text),
+        }
+        if self.language_code:
+            material["language_code"] = self.language_code
+        encoded = json.dumps(material, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(encoded.encode()).hexdigest()[:24]
+
+    def body(self, text: str) -> dict:
+        """What is sent for `text`: the language, when given, beside the
+        model (not among the voice settings)."""
+        out = {"text": normalized(text), "model_id": self.model_id, "voice_settings": self.settings}
+        if self.language_code:
+            out["language_code"] = self.language_code
+        return out
 
 
 def normalized(text: str) -> str:
@@ -224,7 +237,7 @@ def synthesize(text: str, voice: Voice, opener=urllib.request.urlopen) -> tuple[
         "POST",
         f"/v1/text-to-speech/{quote(voice.voice_id, safe='')}/with-timestamps"
         f"?output_format={quote(voice.output_format)}",
-        {"text": normalized(text), "model_id": voice.model_id, "voice_settings": voice.settings},
+        voice.body(text),
         opener,
     )
     try:
@@ -379,6 +392,7 @@ class Narrator:
                 "model_id": self.voice.model_id,
                 "settings": self.voice.settings,
                 "output_format": self.voice.output_format,
+                "language_code": self.voice.language_code,
                 "characters": len(text),
                 "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
             },

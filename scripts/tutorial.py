@@ -26,7 +26,8 @@ script, for each tutorial named:
     python tutorial.py --app target/release/app [--app-arg ARG]… [--env K=V]…
         [--tutorials docs/tutorials] [--work target/tutorials]
         [--no-voice] [--no-video] [--window] [NAME…]
-        [--voice elevenlabs:<voice id>] [--voice-model M] [--voice-setting K=V]…
+        [--voice elevenlabs:<voice id>] [--voice-model M] [--voice-language CODE|auto]
+        [--voice-setting K=V]…
         [--voice-cache DIR] [--dry-run] [--prune-voice-cache DAYS]
         [--app-name NAME] [--voice-intro TEXT | --no-voice-intro]
         [--lang en|de|en,de] [--fast] [--engine E] [--voices DIR] [--fish-python PY]
@@ -61,8 +62,11 @@ written, so a script keeps its text as it should be read:
     all:
       - {from: "XY-Ebene", to: "Iks-Ypsilon-Ebene"}
       - {regex: '\\bM(\\d+)\\.(\\d+)\\b', to: 'M \\1 Komma \\2'}
+      - {regex: '\\b(ISO|DIN) (\\d+)\\b', to: '\\1 \\2', words: [2]}
     fish: []        # and elevenlabs, kokoro: after `all`, for that engine
 
+(`words:` the groups whose digits are said as German number words, "4762"
+"viertausendsiebenhundertzweiundsechzig"; in a German list only),
 applied in order to each section's text as written (its Markdown gone),
 before the units, sizes and signs are read out (`READ_OUT`: "8 mm", "M3",
 "×"), right before it goes to the voice and so into its cache key. A
@@ -170,6 +174,11 @@ ENGINE: str | None = None
 USER_HF_HOME = os.environ.get("HF_HOME")
 VOICE: str | None = None
 VOICE_MODEL: str | None = None
+# The language ElevenLabs is told the text is in (`--voice-language`, else
+# $ELEVENLABS_LANGUAGE, else the script's `voice_language`): a code ("de"),
+# `auto` the run's `--lang`, `off` none. None and no script's: none, so
+# that the sections cached without one keep their keys.
+VOICE_LANGUAGE: str | None = None
 VOICE_SETTINGS: dict = {}
 VOICE_CACHE = WORK / "voices"
 # What the voice says first, over the first step's card: that it is an AI
@@ -342,6 +351,67 @@ ENGINE_SECTION = {"elevenlabs": "elevenlabs", "fish-s2-pro": "fish", "kokoro": "
 TEMPLATE = re.compile(r"\\(?:(\d{1,2})|g<([^<>]*)>|(\\))")
 
 
+GERMAN_ONES = ["", "ein", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun"]
+GERMAN_TEENS = ["zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn",
+                "neunzehn"]
+GERMAN_TENS = ["", "", "zwanzig", "dreißig", "vierzig", "fünfzig", "sechzig", "siebzig", "achtzig", "neunzig"]
+# The largest number said as words; a larger one stays digits.
+GERMAN_MAX = 999_999_999_999
+
+
+def german_below_thousand(n: int, final: bool) -> str:
+    """1 ≤ `n` < 1000 as one German word: a final 1 is "eins" ("einhunderteins"),
+    one before more words "ein" ("einhundertein|tausend")."""
+    out = ""
+    hundreds, rest = divmod(n, 100)
+    if hundreds:
+        out += GERMAN_ONES[hundreds] + "hundert"
+    if rest == 1:
+        out += "eins" if final else "ein"
+    elif 1 < rest < 10:
+        out += GERMAN_ONES[rest]
+    elif 10 <= rest < 20:
+        out += GERMAN_TEENS[rest - 10]
+    elif rest >= 20:
+        tens, ones = divmod(rest, 10)
+        out += (GERMAN_ONES[ones] + "und" if ones else "") + GERMAN_TENS[tens]
+    return out
+
+
+def german_number(n: int) -> str:
+    """0 ≤ `n` ≤ `GERMAN_MAX` as German number words: one word below a
+    million ("dreiundzwanzig", "eintausendeins"), "Million(en)" and
+    "Milliarde(n)" as words of their own ("eine Million zweihundert")."""
+    if n == 0:
+        return "null"
+    parts = []
+    billions, n = divmod(n, 1_000_000_000)
+    millions, n = divmod(n, 1_000_000)
+    for count, one, many in ((billions, "eine Milliarde", "Milliarden"), (millions, "eine Million", "Millionen")):
+        if count == 1:
+            parts.append(one)
+        elif count:
+            parts.append(german_below_thousand(count, False) + " " + many)
+    thousands, n = divmod(n, 1000)
+    word = ""
+    if thousands:
+        word += german_below_thousand(thousands, False) + "tausend"
+    if n:
+        word += german_below_thousand(n, True)
+    if word:
+        parts.append(word)
+    return " ".join(parts)
+
+
+def number_words(digits: str, lang: str) -> str:
+    """`digits` (ASCII digits only) as number words in `lang`; anything else,
+    or a number too large, as it is."""
+    if lang != "de" or not digits or not (digits.isascii() and digits.isdigit()):
+        return digits
+    n = int(digits)
+    return german_number(n) if n <= GERMAN_MAX else digits
+
+
 def word_char(c: str) -> bool:
     """A character of a word, for a `from:`'s whole-word match."""
     return c.isalnum() or c == "_"
@@ -350,10 +420,12 @@ def word_char(c: str) -> bool:
 class Rule:
     """One entry of a pronunciation list: `from:` a literal word or phrase
     (whole words, case as written) or `regex:` (Python's syntax, `\\1` and
-    `\\g<name>` in `to:`), and what is said instead (`to:`)."""
+    `\\g<name>` in `to:`), and what is said instead (`to:`); a regex's
+    `words:` the numbers of its groups whose digits are said as number
+    words (a German list's only)."""
 
-    def __init__(self, entry, where: str):
-        if not isinstance(entry, dict) or "to" not in entry or len(entry) != 2:
+    def __init__(self, entry, where: str, lang: str | None = None):
+        if not isinstance(entry, dict) or "to" not in entry or len(entry) != 2 + ("words" in entry):
             fail(f"{where}: an entry is {{from: …, to: …}} or {{regex: …, to: …}}, not {entry!r}")
         kind = "from" if "from" in entry else "regex" if "regex" in entry else None
         source, to = entry.get(kind), entry["to"]
@@ -366,6 +438,21 @@ class Rule:
                 self.pattern = re.compile(source)
             except re.error as e:
                 fail(f"{where}: regex {source!r}: {e}")
+        self.lang = lang
+        self.words: set[int] = set()
+        if "words" in entry:
+            words = entry["words"]
+            if kind != "regex":
+                fail(f"{where}: words: only in a regex's entry")
+            if lang != "de":
+                fail(f"{where}: words: numbers are said as words in German only (pronunciation.de.yaml), "
+                     f"not in {lang or 'this list'}")
+            if not isinstance(words, list) or not all(
+                isinstance(g, int) and not isinstance(g, bool) and 1 <= g <= self.pattern.groups for g in words
+            ):
+                fail(f"{where}: words: a list of the regex's group numbers (1 to {self.pattern.groups}), "
+                     f"not {words!r}")
+            self.words = set(words)
         self.template = self.parsed(to)
 
     def parsed(self, to: str) -> list:
@@ -411,9 +498,16 @@ class Rule:
             return out
         for m in self.pattern.finditer(text):
             if m.end() > m.start():
-                said = "".join(p if isinstance(p, str) else (m.group(p[0]) or "") for p in self.template)
+                said = "".join(p if isinstance(p, str) else self.group(m, p[0]) for p in self.template)
                 out.append((m.start(), m.end(), said))
         return out
+
+
+    def group(self, m: re.Match, group) -> str:
+        """A group's text as said: its digits as words when `words` has it."""
+        value = m.group(group) or ""
+        number = self.pattern.groupindex.get(group) if isinstance(group, str) else group
+        return number_words(value, self.lang) if number in self.words else value
 
 
 def pronunciation_path(lang: str) -> Path:
@@ -422,9 +516,13 @@ def pronunciation_path(lang: str) -> Path:
     return (PRONUNCIATIONS or DOCS) / f"pronunciation.{lang}.yaml"
 
 
-def load_pronunciations(path: Path) -> dict[str, list[Rule]]:
+def load_pronunciations(path: Path, lang: str | None = None) -> dict[str, list[Rule]]:
     """A pronunciation list's sections, each its rules; none when there is
-    no file."""
+    no file. Its language (for `words:`) is `lang`, else its name's
+    (`pronunciation.<lang>.yaml`)."""
+    if lang is None:
+        stem = path.name.split(".")
+        lang = stem[1] if len(stem) == 3 and stem[0] == "pronunciation" else None
     if not path.exists():
         return {}
     import yaml
@@ -439,7 +537,7 @@ def load_pronunciations(path: Path) -> dict[str, list[Rule]]:
             fail(f"{path}: section {section!r}: one of {', '.join(PRONUNCIATION_SECTIONS)}")
         if entries is not None and not isinstance(entries, list):
             fail(f"{path}: {section}: a list")
-        out[section] = [Rule(e, f"{path.name}: {section} {k + 1}") for k, e in enumerate(entries or [])]
+        out[section] = [Rule(e, f"{path.name}: {section} {k + 1}", lang) for k, e in enumerate(entries or [])]
     return out
 
 
@@ -718,6 +816,25 @@ class Kokoro:
         return f"Kokoro: {total} sections, {self.cached} from the cache, {self.spoken} {verb}"
 
 
+def elevenlabs_language(script: dict) -> str | None:
+    """The language ElevenLabs is told (its `language_code`): `--voice-language`,
+    else `$ELEVENLABS_LANGUAGE`, else the script's `voice_language`; `auto`
+    is the run's `--lang`, `off` (or nothing) none. A language's name
+    ("German", as Fish is given it) is its code."""
+    choice = VOICE_LANGUAGE or os.environ.get("ELEVENLABS_LANGUAGE") or script.get("voice_language") or ""
+    choice = str(choice).strip()
+    if not choice or choice.lower() in ("off", "none"):
+        return None
+    if choice.lower() == "auto":
+        return LANG
+    for lang, strings in STRINGS.items():
+        if strings["language"] and choice.lower() == strings["language"].lower():
+            return lang
+    if not re.fullmatch(r"[A-Za-z]{2,3}", choice):
+        fail(f"voice language {choice!r}: a language code (de, en), auto or off")
+    return choice.lower()
+
+
 def speaker_of(script: dict, dry_run: bool = False, opener=None) -> dict:
     """Who speaks: the backend that says each section (`narrator`) and how
     the notices name the voice."""
@@ -776,7 +893,8 @@ def speaker_of(script: dict, dry_run: bool = False, opener=None) -> dict:
     settings.update(script.get("voice_settings") or {})
     settings.update(VOICE_SETTINGS)
     model = VOICE_MODEL or os.environ.get("ELEVENLABS_MODEL") or script.get("voice_model") or elevenlabs.MODEL
-    the_voice = elevenlabs.Voice(voice, str(model), settings)
+    language = elevenlabs_language(script)
+    the_voice = elevenlabs.Voice(voice, str(model), settings, language_code=language)
     name = str(script.get("voice_name") or "").strip()
     if not name:
         # Asked of ElevenLabs once (no characters), kept in the cache; the
@@ -788,6 +906,7 @@ def speaker_of(script: dict, dry_run: bool = False, opener=None) -> dict:
         "backend": "elevenlabs",
         "voice": voice,
         "label": f"ElevenLabs, {name}",
+        "language": language,
         "made_by": f"ElevenLabs' text-to-speech (model {model}, voice {name})",
         "made_by_md": f"ElevenLabs' text-to-speech (model `{model}`, voice {name}, id `{voice}`)",
         "track": f"ElevenLabs {model}, {name}",
@@ -1433,6 +1552,9 @@ def main() -> None:
     )
     p.add_argument("--voice-model", help="ElevenLabs' model (else $ELEVENLABS_MODEL, the script's voice_model, "
                    f"{'eleven_multilingual_v2'})")
+    p.add_argument("--voice-language", metavar="CODE",
+                   help="the language ElevenLabs is told the text is in (its language_code: de, en; auto: the "
+                   "run's --lang; off: none; else $ELEVENLABS_LANGUAGE, the script's voice_language, none)")
     p.add_argument("--voice-setting", action="append", default=[], metavar="K=V",
                    help="a voice setting of ElevenLabs (stability=0.4, speed=1.05, …) or Fish (seed=7, …)")
     p.add_argument("--voice-cache", help="the cache of ElevenLabs' and Fish S2 Pro's sections (else "
@@ -1461,7 +1583,7 @@ def main() -> None:
     p.add_argument("--out", help="the video, its narration and subtitles in OUT/<name>[.<lang>]/ (else the video "
                    "beside the script)")
     a = p.parse_args()
-    global WINDOW, DOCS, WORK, APP, APP_ARGS, APP_ENV, VOICE, VOICE_MODEL, VOICE_SETTINGS, VOICE_CACHE
+    global WINDOW, DOCS, WORK, APP, APP_ARGS, APP_ENV, VOICE, VOICE_MODEL, VOICE_LANGUAGE, VOICE_SETTINGS, VOICE_CACHE
     global APP_NAME, VOICE_INTRO, FISH_PYTHON, VOICES, ENGINE, FAST, REMIX, OUT, PRONUNCIATIONS
     WINDOW = a.window
     DOCS = (ROOT / a.tutorials).resolve()
@@ -1470,6 +1592,7 @@ def main() -> None:
     APP_ENV = dict(e.split("=", 1) for e in a.env)
     VOICE = a.voice
     VOICE_MODEL = a.voice_model
+    VOICE_LANGUAGE = a.voice_language
     for kv in a.voice_setting:
         k, sep, v = kv.partition("=")
         if not sep:

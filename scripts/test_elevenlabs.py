@@ -5,6 +5,7 @@ nothing here asks the real ElevenLabs (each call costs money).
 """
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -102,6 +103,30 @@ class Key(unittest.TestCase):
         other = dict(elevenlabs.SETTINGS, stability=0.3)
         self.assertNotEqual(k, elevenlabs.Voice("v1", settings=other).key("Open it."))
 
+    def test_a_language_only_when_given(self):
+        # Without a language, the key is what it was before there was one
+        # (the hash of exactly these fields), so cached sections stay.
+        material = json.dumps(
+            {
+                "format": elevenlabs.CACHE_FORMAT,
+                "backend": "elevenlabs",
+                "voice_id": "v1",
+                "model_id": elevenlabs.MODEL,
+                "settings": elevenlabs.SETTINGS,
+                "output_format": elevenlabs.OUTPUT_FORMAT,
+                "text": "Öffne es.",
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        before = hashlib.sha256(material.encode()).hexdigest()[:24]
+        self.assertEqual(elevenlabs.Voice("v1").key("Öffne es."), before)
+        self.assertEqual(elevenlabs.Voice("v1", language_code=None).key("Öffne es."), before)
+        self.assertEqual(elevenlabs.Voice("v1", language_code="").key("Öffne es."), before)
+        german = elevenlabs.Voice("v1", language_code="de").key("Öffne es.")
+        self.assertNotEqual(german, before)
+        self.assertNotEqual(german, elevenlabs.Voice("v1", language_code="en").key("Öffne es."))
+
 
 class Narration(unittest.TestCase):
     def setUp(self):
@@ -185,6 +210,20 @@ class Narration(unittest.TestCase):
             self.narrator(broken).say("One.")
         self.assertEqual(elevenlabs.Cache(self.cache).entries(), [])
 
+    def test_the_language_is_sent_beside_the_model(self):
+        api = FakeAPI()
+        voice = elevenlabs.Voice("v1", model_id="eleven_v3", language_code="de")
+        self.narrator(api, voice).say("Zwölf Schrauben.")
+        body = api.posts()[0]
+        self.assertEqual(body["language_code"], "de")
+        self.assertEqual(body["model_id"], "eleven_v3")
+        self.assertNotIn("language_code", body["voice_settings"])
+        self.assertIn("/with-timestamps", api.requests[0].full_url)
+        # Without one, none is sent.
+        api = FakeAPI()
+        self.narrator(api).say("Twelve screws.")
+        self.assertNotIn("language_code", api.posts()[0])
+
     def test_prune_removes_what_was_not_used(self):
         api = FakeAPI()
         n = self.narrator(api)
@@ -208,6 +247,7 @@ class Choice(unittest.TestCase):
             mock.patch.object(tutorial, "FAST", False),
             mock.patch.object(tutorial, "LANG", "en"),
             mock.patch.object(tutorial, "VOICE_MODEL", None),
+            mock.patch.object(tutorial, "VOICE_LANGUAGE", None),
             mock.patch.object(tutorial, "VOICE_SETTINGS", {}),
             mock.patch.object(tutorial, "VOICE_CACHE", Path(self.tmp.name)),
             mock.patch.dict(os.environ, {elevenlabs.KEY_ENV: KEY}),
@@ -217,6 +257,7 @@ class Choice(unittest.TestCase):
             self.addCleanup(p.stop)
         os.environ.pop("SCREENCAST_VOICE", None)
         os.environ.pop("ELEVENLABS_MODEL", None)
+        os.environ.pop("ELEVENLABS_LANGUAGE", None)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -257,6 +298,30 @@ class Choice(unittest.TestCase):
         self.assertEqual(narrator.voice.settings["speed"], 1.1)
         self.assertEqual(speaker["label"], "ElevenLabs, Narrator")
         self.assertEqual(api.requests, [])  # the name was given: nothing asked
+
+    def test_the_language_off_by_default_then_script_environment_command_line(self):
+        script = {"voice": "elevenlabs:v1", "voice_name": "N"}
+
+        def language(s=script):
+            return tutorial.speaker_of(s, opener=FakeAPI())["narrator"]().voice.language_code
+
+        self.assertIsNone(language())
+        with mock.patch.object(tutorial, "LANG", "de"):
+            # Off unless asked for, in German too: the keys stay.
+            self.assertIsNone(language())
+            self.assertEqual(language(dict(script, voice_language="de")), "de")
+            # Fish's name of a language is its code.
+            self.assertEqual(language(dict(script, voice_language="German")), "de")
+            with mock.patch.dict(os.environ, {"ELEVENLABS_LANGUAGE": "auto"}):
+                self.assertEqual(language(dict(script, voice_language="en")), "de")
+                with mock.patch.object(tutorial, "VOICE_LANGUAGE", "fr"):
+                    self.assertEqual(language(), "fr")
+                with mock.patch.object(tutorial, "VOICE_LANGUAGE", "off"):
+                    self.assertIsNone(language(dict(script, voice_language="de")))
+        with mock.patch.object(tutorial, "VOICE_LANGUAGE", "auto"):
+            self.assertEqual(language(), "en")
+        with mock.patch.object(tutorial, "VOICE_LANGUAGE", "Klingonisch!"), self.assertRaises(SystemExit):
+            language()
 
 
 if __name__ == "__main__":

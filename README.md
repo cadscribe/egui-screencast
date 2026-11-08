@@ -130,9 +130,22 @@ speed: 1.0                        # ElevenLabs' speed (0.7 to 1.2) unless voice_
 
 `--voice-setting K=V` (repeated) sets one over the script's.
 
+**The language.** A model guesses the text's language unless it is told:
+`--voice-language de` (else `$ELEVENLABS_LANGUAGE`, else the script's
+`voice_language:`) sends `language_code: "de"` beside the model, `auto`
+the run's `--lang`, `off` none. It is off unless asked for. German reads
+its numbers far better with `eleven_v3` told so:
+
+    python scripts/tutorial.py --app … --lang de --voice elevenlabs:<voice id> \
+        --voice-model eleven_v3 --voice-language de
+
+A language is part of a section's cache key only when one is sent, so
+the sections cached without one keep their keys.
+
 **The cache.** Every section said (a step's text, the voice's own notice)
 is kept by a key: the SHA-256 of the backend, the voice id, the model, the
-voice settings, the output format and the text as said (after `spoken()`,
+voice settings, the output format, the language (only when one is sent)
+and the text as said (after `spoken()`,
 its whitespace made single spaces). A section whose key is in the cache is
 never asked for again; only new or changed text is sent. An entry is a
 folder (`audio.wav`, `words.json`, `meta.json`) made whole and then renamed
@@ -281,6 +294,12 @@ fish:                             # fish (S2 Pro), kokoro
 - `from:` is a word or phrase as written, matched whole (not inside a
   longer word) and in its case; `regex:` is a Python regex, its groups
   `\1` or `\g<name>` in `to:` (and `\\` a backslash).
+- A regex's `words: [2]` says its group 2's digits as number words, in a
+  German list only: `{regex: '\b(ISO|DIN) (\d+)\b', to: '\1 \2', words: [2]}`
+  gives "ISO viertausendsiebenhundertzweiundsechzig" for "ISO 4762". Below
+  a million it is one word ("einhunderteins", "eintausend", a final 1
+  "eins"), "eine Million", "zwei Milliarden" are words of their own; 0 is
+  "null", a number over 999 999 999 999 stays digits.
 - Each entry is applied in order to the text the ones before made: the
   engine's section after `all`. Without a voice (`--no-voice`), only `all`.
 - They see the step's text as written, its Markdown gone, before the

@@ -495,6 +495,42 @@ kokoro: []
         # No list in a language: nothing replaced.
         self.assertEqual(tutorial.said_text("Die XY-Ebene", "kokoro", "en"), "Die XY-Ebene")
 
+    def test_number_words_of_a_group(self):
+        (self.dir / "pronunciation.de.yaml").write_text(
+            r"""
+all:
+  - {regex: '\b(ISO|DIN|EN) (\d+)\b', to: '\1 \2', words: [2]}
+  - {from: "ISO", to: "Iso"}
+""",
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            self.said("Eine ISO 4762 und DIN 780, ISO 53."),
+            "Eine Iso viertausendsiebenhundertzweiundsechzig und DIN siebenhundertachtzig, Iso dreiundfünfzig.",
+        )
+        # A named group by its number, digits only.
+        self.assertEqual(
+            tutorial.Rule({"regex": r"N(?P<n>\w+)", "to": r"N\g<n>", "words": [1]}, "t", "de")
+            .spans("N21 Nx1")[0][2],
+            "Neinundzwanzig",
+        )
+        self.assertEqual(tutorial.Rule({"regex": r"N(\w+)", "to": r"\1", "words": [1]}, "t", "de")
+                         .spans("Nx1")[0][2], "x1")
+
+    def test_german_number_words(self):
+        cases = {
+            0: "null", 1: "eins", 7: "sieben", 11: "elf", 16: "sechzehn", 17: "siebzehn", 21: "einundzwanzig",
+            30: "dreißig", 100: "einhundert", 101: "einhunderteins", 121: "einhunderteinundzwanzig",
+            1000: "eintausend", 1001: "eintausendeins", 4762: "viertausendsiebenhundertzweiundsechzig",
+            101000: "einhunderteintausend", 1_000_000: "eine Million", 2_000_001: "zwei Millionen eins",
+            1_000_000_000: "eine Milliarde",
+        }
+        for n, words in cases.items():
+            self.assertEqual(tutorial.german_number(n), words, n)
+        self.assertEqual(tutorial.number_words("0042", "de"), "zweiundvierzig")
+        self.assertEqual(tutorial.number_words("1" * 13, "de"), "1" * 13)
+        self.assertEqual(tutorial.number_words("42", "en"), "42")
+
     def test_a_bad_list_stops_the_build(self):
         for bad in (
             "fishaudio: []",
@@ -504,11 +540,22 @@ kokoro: []
             "all: [{regex: 'a(b)', to: '\\2'}]",
             "all: [{from: a, to: '\\1'}]",
             "all: [{regex: 'a', to: '\\n'}]",
+            "all: [{regex: 'a(1)', to: '\\1', words: [1]}]",  # not in an English list
         ):
             (self.dir / "pronunciation.en.yaml").write_text(bad, encoding="utf-8")
             tutorial.LOADED_PRONUNCIATIONS.clear()
             with self.assertRaises(SystemExit, msg=bad):
                 tutorial.rules_for("en", "kokoro")
+        for bad in (
+            "all: [{from: a, to: b, words: [1]}]",
+            "all: [{regex: 'a(1)', to: '\\1', words: [2]}]",
+            "all: [{regex: 'a(1)', to: '\\1', words: 1}]",
+            "all: [{regex: 'a(1)', to: '\\1', words: [true]}]",
+        ):
+            (self.dir / "pronunciation.de.yaml").write_text(bad, encoding="utf-8")
+            tutorial.LOADED_PRONUNCIATIONS.clear()
+            with self.assertRaises(SystemExit, msg=bad):
+                tutorial.rules_for("de", "kokoro")
 
     def test_the_voice_gets_the_replaced_text_and_cues_find_it(self):
         narrator = FakeNarrator(self.dir)
