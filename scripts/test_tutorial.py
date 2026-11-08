@@ -3,6 +3,7 @@
     python -m unittest discover scripts   # with the venv's Python (PyYAML)
 """
 
+import json
 import sys
 import tempfile
 import unittest
@@ -207,6 +208,169 @@ class Languages(unittest.TestCase):
             self.assertEqual(tutorial.images_dir({"ui_languages": ["en", "de"]}), "images.de")
         self.assertEqual(tutorial.suffix(), "")
         self.assertEqual(tutorial.voice_notice({}), "Voice: AI-generated (Kokoro)")
+
+
+def spoken_words(rate: int = 24_000):
+    """A word (a tone) from 0.1 s to 0.5 s, a pause with a little noise to
+    0.7 s, a second word to 1.2 s: 16-bit-like float audio."""
+    import numpy as np
+
+    t = np.arange(round(1.3 * rate)) / rate
+    data = np.random.default_rng(1).normal(0, 3e-4, len(t)).astype(np.float32)
+    for a, b in ((0.1, 0.5), (0.7, 1.2)):
+        on = (t >= a) & (t < b)
+        data[on] += 0.4 * np.sin(2 * np.pi * 220 * t[on]).astype(np.float32)
+    return data
+
+
+class Cuts(unittest.TestCase):
+    RATE = 24_000
+
+    def test_a_cue_late_into_its_word_is_cut_in_the_pause_before_it(self):
+        data = spoken_words(self.RATE)
+        # The aligner puts the second word 70 ms after it begins.
+        cut = tutorial.quiet_cut(data, self.RATE, 0.77)
+        self.assertGreater(cut / self.RATE, 0.5)
+        self.assertLess(cut / self.RATE, 0.7)
+        # The pause's start (a frame into it), not right before the word.
+        self.assertLess(cut / self.RATE, 0.55)
+
+    def test_cuts_follow_each_other(self):
+        data = spoken_words(self.RATE)
+        points = tutorial.cut_points(data, self.RATE, [(0.77, 0.5), (0.72, 1.0)])
+        self.assertEqual(len(points), 2)
+        self.assertGreaterEqual(points[1], points[0])
+
+    def test_each_piece_is_faded_and_added(self):
+        import numpy as np
+
+        rate = self.RATE
+        data = spoken_words(rate)
+        track = np.full(round(3 * rate), 0.1, dtype=np.float32)
+        at_cuts = tutorial.place_narration(track, data, rate, 0.5, [(0.77, 0.4)])
+        cut = round(at_cuts[0] * rate)
+        self.assertTrue(0.5 < at_cuts[0] < 0.7)
+        # The first word where it was, added to what was there.
+        k = round((0.5 + 0.3) * rate)
+        self.assertAlmostEqual(float(track[k]), 0.1 + float(data[k - round(0.5 * rate)]), places=5)
+        # The second word 0.4 s later, the gap only what was there before.
+        gap = round((0.5 + at_cuts[0] + 0.2) * rate)
+        self.assertLess(float(np.abs(track[gap] - 0.1)), 0.01)
+        k = round((0.5 + 0.4 + 0.9) * rate)
+        self.assertAlmostEqual(float(track[k]), 0.1 + float(data[round(0.9 * rate)]), places=5)
+        # Faded at the cut: each piece starts and ends at nothing.
+        piece = tutorial.faded(np.ones(1000, dtype=np.float32), rate)
+        self.assertEqual(float(piece[0]), 0.0)
+        self.assertLess(float(piece[-1]), 0.01)
+        self.assertEqual(float(piece[500]), 1.0)
+        start = round((0.5 + 0.4) * rate) + cut
+        self.assertAlmostEqual(float(track[start]), 0.1, places=5)
+
+    def test_no_cut_where_the_words_do_not_wait(self):
+        import numpy as np
+
+        data = spoken_words(self.RATE)
+        track = np.zeros(round(2 * self.RATE), dtype=np.float32)
+        tutorial.place_narration(track, data, self.RATE, 0.0, [(0.77, 0.0)])
+        np.testing.assert_allclose(track[200:len(data) - 200], data[200:len(data) - 200])
+
+    def test_the_subtitles_move_from_the_cut_on(self):
+        said = [
+            {"text": "Click", "start": 0.1, "end": 0.5, "space": True},
+            {"text": "Open", "start": 0.77, "end": 1.2, "space": True},
+        ]
+        # The cut at 0.52 s moves "Open" (at 0.77 s) as one with its sound.
+        subs = tutorial.subtitles_of(said, [(0.52, 0.4)])
+        self.assertEqual([t for _, _, t in subs], ["Click", "Open"])
+        self.assertAlmostEqual(subs[1][0], 1.17)
+
+
+class Cached:
+    """A narrator's cache: the sections given, nothing else (as a dry run:
+    `None` for a section it has not)."""
+
+    def __init__(self, folder: Path, texts: list[str]):
+        self.fake = FakeNarrator(folder)
+        self.have = {t: self.fake.say(t) for t in texts}
+        self.asked: list[str] = []
+
+    def say(self, text: str):
+        self.asked.append(text)
+        return self.have.get(text, (None, 0.0, []))
+
+    def report(self) -> str:
+        return "cached"
+
+
+class Remix(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.docs, self.work, self.out = root / "docs", root / "work", root / "out"
+        (self.docs / "t").mkdir(parents=True)
+        (self.docs / "t" / "script.yaml").write_text(
+            "title: T\nsteps:\n"
+            "  - {name: a, say: 'Click it. Open it.', actions: [{cue: Open it}]}\n"
+            "  - {name: b, say: Next.}\n",
+            encoding="utf-8",
+        )
+        record = self.work / "t" / "recording"
+        (record / "frames").mkdir(parents=True)
+        (record / "frames.txt").write_text("", encoding="utf-8")
+        plan = {"fps": 30, "steps": [
+            {"name": "a", "actions": [{"cue": 1.5, "words": "Open it"}], "shot": None, "seconds": 3.0},
+            {"name": "b", "actions": [], "shot": None, "seconds": 1.0},
+        ], "caption": "Voice: AI-generated (Kokoro)"}
+        (self.work / "t" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+        timeline = {"fps": 30, "frames": 180, "errors": [],
+                    "steps": [{"start": 0, "cues": [60]}, {"start": 120, "cues": []}]}
+        (record / "timeline.json").write_text(json.dumps(timeline), encoding="utf-8")
+        cache = root / "cache"
+        cache.mkdir()
+        self.cached = Cached(cache, ["Click it. Open it.", "Next."])
+        speaker = dict(tutorial.KOKORO_SPEAKER, narrator=lambda: self.cached)
+        self.ffmpeg = []
+        for p in (
+            mock.patch.object(tutorial, "DOCS", self.docs),
+            mock.patch.object(tutorial, "WORK", self.work),
+            mock.patch.object(tutorial, "OUT", self.out),
+            mock.patch.object(tutorial, "REMIX", True),
+            mock.patch.object(tutorial, "VOICE_INTRO", False),
+            mock.patch.object(tutorial, "speaker_of", lambda script, dry_run=False: speaker),
+            mock.patch.object(tutorial, "play", mock.Mock(side_effect=AssertionError("the app was started"))),
+            mock.patch.object(tutorial.subprocess, "run", lambda cmd, **kw: self.ffmpeg.append(cmd)),
+            mock.patch.object(tutorial.shutil, "which", lambda name: "/usr/bin/" + name),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_it_uses_the_recording_and_the_cache_and_not_the_app(self):
+        tutorial.build("t", voice=True, with_video=True, lang="en")
+        made = self.out / "t"
+        self.assertTrue((made / "narration.wav").exists())
+        self.assertIn("Open it.", (made / "subtitles.srt").read_text(encoding="utf-8"))
+        self.assertEqual(len(self.ffmpeg), 1)
+        cmd = [str(c) for c in self.ffmpeg[0]]
+        self.assertEqual(cmd[-1], str(made / "t.mp4"))
+        self.assertIn(str(self.work / "t" / "recording" / "frames.txt"), cmd)
+        self.assertEqual(self.cached.asked, ["Click it. Open it.", "Next."])
+        # Nothing written beside the script or into the recording.
+        self.assertEqual(sorted(p.name for p in (self.docs / "t").iterdir()), ["script.yaml"])
+        self.assertFalse((self.work / "t" / "narration.wav").exists())
+
+    def test_a_section_not_in_the_cache_stops_it(self):
+        del self.cached.have["Next."]
+        with self.assertRaises(SystemExit) as e:
+            tutorial.build("t", voice=True, with_video=True, lang="en")
+        self.assertIn("not in the cache", str(e.exception))
+        self.assertEqual(self.ffmpeg, [])
+
+    def test_no_recording_stops_it(self):
+        (self.work / "t" / "recording" / "timeline.json").unlink()
+        with self.assertRaises(SystemExit) as e:
+            tutorial.build("t", voice=True, with_video=True, lang="en")
+        self.assertIn("needs a recording", str(e.exception))
 
 
 if __name__ == "__main__":

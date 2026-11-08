@@ -30,6 +30,7 @@ script, for each tutorial named:
         [--voice-cache DIR] [--dry-run] [--prune-voice-cache DAYS]
         [--app-name NAME] [--voice-intro TEXT | --no-voice-intro]
         [--lang en|de|en,de] [--fast] [--engine E] [--voices DIR] [--fish-python PY]
+        [--remix] [--out DIR]
 
 What is said and what is seen go together: an action `cue: "Open it"`
 waits until the narration says those words (the times of its words, from
@@ -44,6 +45,14 @@ In an `--app-arg` or `--env`, `{lang}` is the run's language. In an
 `--app-arg`, `{work}` is the tutorial's work folder (an app's own
 settings folder, say). Paths are taken from the folder it is run in. Without
 names, every tutorial is built. Work files are kept in `<work>/<name>/`.
+
+Where a cue's words wait, the narration is cut at the quiet just before
+the cue's word (its time from the aligner comes a little late), each piece
+faded in and out. `--remix` makes the narration, the subtitles and the
+video again from a recording already made (`<work>/<name>/recording`, its
+`plan.json`) and the cached sections, without the app and without speaking
+anything. `--out DIR` writes the video and its narration and subtitles to
+`DIR/<name>[.<lang>]/` instead.
 """
 
 import argparse
@@ -160,6 +169,19 @@ INTRO_PAUSE = 0.6
 # A subtitle ends at a sentence's end, at a cue, or at a comma once it is
 # this long.
 SUBTITLE_CHARS = 80
+# Where the words after a cue wait, the cut is at the quietest point of the
+# narration from this long before the cue's word to this long after it
+# (forced alignment finds a word some 70 ms late), in frames this long.
+CUT_BEFORE = 0.30
+CUT_AFTER = 0.03
+CUT_FRAME = 0.010
+# Each piece of a cut narration is faded in and out over this long.
+FADE = 0.006
+# Made again from a recording and the cached sections (`--remix`).
+REMIX = False
+# The made files' folder (`--out`): else the video beside the script, its
+# narration and subtitles in the work folder.
+OUT: Path | None = None
 
 def fail(message: str) -> None:
     sys.exit(f"tutorials: {message}")
@@ -236,6 +258,20 @@ def suffix() -> str:
 
 def work_dir(name: str) -> Path:
     return WORK / f"{name}{suffix()}"
+
+
+def made_dir(name: str) -> Path:
+    """Where the narration, subtitles and joined sections go: the work
+    folder, or `--out`'s `<name>[.<lang>]`."""
+    return OUT / f"{name}{suffix()}" if OUT else work_dir(name)
+
+
+def shown(path: Path) -> Path:
+    """`path` from the folder run in, when it is below it."""
+    try:
+        return path.relative_to(ROOT)
+    except ValueError:
+        return path
 
 
 def plain(markdown: str) -> str:
@@ -510,7 +546,7 @@ def narrate(name: str, script: dict, voice: bool, speaker: dict | None = None, n
         wav, seconds, words = narrator.say(intro)
         first = out[0]
         shift = seconds + INTRO_PAUSE
-        joined = work_dir(name) / "first-step.wav"
+        joined = made_dir(name) / "first-step.wav"
         if wav is not None and first["wav"] is not None:
             join_wavs([(wav, INTRO_PAUSE), (first["wav"], 0.0)], joined)
         elif wav is not None:
@@ -699,6 +735,97 @@ def late_at(cues: list[tuple[float, float]], t: float) -> float:
     return late
 
 
+def energy(data, rate: int, frame: float = CUT_FRAME):
+    """The short-time RMS of `data` in frames `frame` long, one centred on
+    each sample (at the ends, over what there is)."""
+    import numpy as np
+
+    n = max(1, round(frame * rate))
+    power = np.concatenate([[0.0], np.cumsum(np.asarray(data, dtype=np.float64) ** 2)])
+    idx = np.arange(len(data))
+    lo = np.clip(idx - n // 2, 0, len(data))
+    hi = np.clip(idx - n // 2 + n, 0, len(data))
+    return np.sqrt((power[hi] - power[lo]) / np.maximum(hi - lo, 1))
+
+
+def quiet_cut(data, rate: int, at: float, floor: int = 0) -> int:
+    """The sample to cut `data` at for a cue whose word starts at `at`
+    seconds, by the aligner: the quietest point from `CUT_BEFORE` before to
+    `CUT_AFTER` after it, not before `floor`. Of the quiet run there, its
+    start (a frame into it): the pause before the word, not the word's own
+    first sound."""
+    import numpy as np
+
+    end = len(data)
+    lo = min(end, max(floor, round((at - CUT_BEFORE) * rate)))
+    hi = min(end, max(lo, round((at + CUT_AFTER) * rate)))
+    if hi - lo < 2:
+        return min(end, max(floor, round(at * rate)))
+    rms = energy(data[lo:hi], rate)
+    least = float(rms.min())
+    # Quiet: within a little of the least (6 dB, or -66 dBFS of noise).
+    quiet = rms <= max(2 * least, least + 5e-4)
+    k = int(np.argmin(rms))
+    start = k
+    while start > 0 and quiet[start - 1]:
+        start -= 1
+    stop = k
+    while stop + 1 < len(quiet) and quiet[stop + 1]:
+        stop += 1
+    # A frame into the run, or its middle when it is shorter.
+    into = min(round(CUT_FRAME * rate), (stop - start) // 2)
+    return lo + start + into
+
+
+def cut_points(data, rate: int, cues: list[tuple[float, float]]) -> list[int]:
+    """Where a step's narration is cut for its cues: at the quiet before
+    each cue's word, in order, none before the one before it."""
+    points = []
+    floor = 0
+    for at, _ in cues:
+        cut = quiet_cut(data, rate, at, floor)
+        points.append(cut)
+        floor = cut
+    return points
+
+
+def faded(piece, rate: int, fade: float = FADE):
+    """`piece` faded in at its start and out at its end, so a cut never
+    clicks."""
+    import numpy as np
+
+    piece = np.array(piece, dtype=np.float32)
+    n = min(round(fade * rate), len(piece) // 2)
+    if n > 0:
+        ramp = np.linspace(0.0, 1.0, n, endpoint=False, dtype=np.float32)
+        piece[:n] *= ramp
+        piece[len(piece) - n :] *= ramp[::-1]
+    return piece
+
+
+def place_narration(track, data, rate: int, start: float, cues: list[tuple[float, float]]) -> list[float]:
+    """A step's narration `data` added into `track` from `start` seconds,
+    cut at the quiet before each cue's word and each piece from there on as
+    much later as its cue came late, faded at its edges. The seconds into
+    the narration where each cut is, for the subtitles."""
+    points = cut_points(data, rate, cues)
+    # Cut only where the words wait longer than before.
+    edges, lates = [0], [0.0]
+    for point, (_, late) in zip(points, cues):
+        if late != lates[-1]:
+            edges.append(point)
+            lates.append(late)
+    edges.append(len(data))
+    for k, late in enumerate(lates):
+        piece = faded(data[edges[k] : edges[k + 1]], rate)
+        at = round((start + late) * rate) + edges[k]
+        piece = piece[: max(0, len(track) - at)]
+        # Added: the pieces of a step never overlap (each starts no earlier
+        # than the one before it ends), a step's may run into the next one.
+        track[at : at + len(piece)] += piece
+    return [p / rate for p in points]
+
+
 def subtitles_of(words: list[dict], cues: list[tuple[float, float]]) -> list[tuple[float, float, str]]:
     """A step's subtitles from its words, as (start, end, text) in seconds
     from the step's start: what is said, when it is said. One ends at a
@@ -756,20 +883,20 @@ def video(name: str, script: dict, audio, the_plan: dict, timeline: dict, speake
         if wav is not None:
             data, r = sf.read(wav, dtype="float32")
             assert r == rate, f"{wav}: {r} Hz"
-            cuts = [0] + [min(len(data), round(at * rate)) for at, _ in cues] + [len(data)]
-            lates = [0.0] + [late for _, late in cues]
-            for k, late in enumerate(lates):
-                piece = data[cuts[k] : cuts[k + 1]]
-                at = round((start + late) * rate) + cuts[k]
-                piece = piece[: max(0, len(track) - at)]
-                track[at : at + len(piece)] = piece
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            at_cuts = place_narration(track, data, rate, start, cues)
+            # The words from each cut on move with their sound.
+            cues = [(min(at, cut), late) for (at, late), cut in zip(cues, at_cuts)]
         for s, e, said in subtitles_of(audio[i]["words"], cues):
             srt.append(f"{len(srt) + 1}\n{srt_time(start + s)} --> {srt_time(start + e)}\n{said}\n")
-    narration = work / "narration.wav"
-    sf.write(narration, track, rate, subtype="PCM_16")
-    subtitles = work / "subtitles.srt"
+    made = made_dir(name)
+    made.mkdir(parents=True, exist_ok=True)
+    narration = made / "narration.wav"
+    sf.write(narration, np.clip(track, -1.0, 1.0), rate, subtype="PCM_16")
+    subtitles = made / "subtitles.srt"
     subtitles.write_text("\n".join(srt), encoding="utf-8")
-    out = DOCS / name / f"{name}{suffix()}.mp4"
+    out = (made if OUT else DOCS / name) / f"{name}{suffix()}.mp4"
     voiced = "caption" in the_plan
     speaker = speaker or KOKORO_SPEAKER
     notice = voice_notice(script, speaker)
@@ -804,7 +931,7 @@ def video(name: str, script: dict, audio, the_plan: dict, timeline: dict, speake
         "-t", f"{timeline['frames'] / fps:.3f}",
         out,
     ]
-    print(f"  encoding {out.relative_to(ROOT)}", flush=True)
+    print(f"  encoding {shown(out)}", flush=True)
     subprocess.run([str(c) for c in cmd], check=True)
     return out
 
@@ -846,6 +973,48 @@ def readme(name: str, script: dict, the_plan: dict, speaker: dict | None = None)
     (DOCS / name / f"README{suffix()}.md").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
+class CachedOnly:
+    """A narrator that only gives what is in the cache (`--remix`): a
+    section not there stops the run, nothing is spoken."""
+
+    def __init__(self, narrator, name: str):
+        self.narrator = narrator
+        self.name = name
+        self.sections = 0
+
+    def say(self, text: str):
+        wav, seconds, words = self.narrator.say(text)
+        if wav is None or not Path(wav).exists():
+            fail(f"{self.name}: --remix: a section is not in the cache ({text[:60]!r}…); build it without --remix")
+        self.sections += 1
+        return wav, seconds, words
+
+    def report(self) -> str:
+        return f"{self.sections} sections from the cache"
+
+
+def remix(name: str, script: dict, voice: bool, speaker: dict | None) -> None:
+    """The narration, subtitles and video made again from the recording
+    of an earlier run and the cached sections: the app is not started,
+    nothing is spoken."""
+    work = work_dir(name)
+    record = work / "recording"
+    needed = [work / "plan.json", record / "timeline.json", record / "frames.txt", record / "frames"]
+    missing = [shown(p) for p in needed if not p.exists()]
+    if missing:
+        fail(f"{name}: --remix needs a recording: no {', '.join(map(str, missing))} (build it without --remix)")
+    the_plan = json.loads((work / "plan.json").read_text(encoding="utf-8"))
+    timeline = json.loads((record / "timeline.json").read_text(encoding="utf-8"))
+    if [s["name"] for s in the_plan["steps"]] != [s["name"] for s in script["steps"]]:
+        fail(f"{name}: --remix: the script's steps are not the recording's; build it without --remix")
+    if len(timeline["steps"]) != len(the_plan["steps"]):
+        fail(f"{name}: --remix: {record / 'timeline.json'} has not every step of the plan")
+    narrator = CachedOnly(speaker["narrator"](), name) if voice else None
+    audio = narrate(name, script, voice, speaker, narrator)
+    out = video(name, script, audio, the_plan, timeline, speaker)
+    print(f"  {shown(out)}: {timeline['frames'] / timeline['fps']:.1f} s", flush=True)
+
+
 def build(name: str, voice: bool, with_video: bool, dry_run: bool = False, lang: str = "en") -> None:
     global LANG
     LANG = lang
@@ -855,6 +1024,12 @@ def build(name: str, voice: bool, with_video: bool, dry_run: bool = False, lang:
     if missing:
         fail(f"{name}: no {lang} text in steps {', '.join(map(str, missing))} (say: {{en: …, {lang}: …}} or say_{lang}:)")
     script = localized(original, lang)
+    if REMIX:
+        try:
+            remix(name, script, voice, speaker_of(script, dry_run=True) if voice else None)
+        except elevenlabs.SpeechError as e:
+            fail(f"{name}: {e}")
+        return
     try:
         speaker = speaker_of(script, dry_run) if voice else None
         audio = narrate(name, script, voice, speaker)
@@ -869,9 +1044,9 @@ def build(name: str, voice: bool, with_video: bool, dry_run: bool = False, lang:
     if with_video:
         out = video(name, script, audio, the_plan, timeline, speaker)
         seconds = timeline["frames"] / timeline["fps"]
-        print(f"  {out.relative_to(ROOT)}: {seconds:.1f} s", flush=True)
+        print(f"  {shown(out)}: {seconds:.1f} s", flush=True)
     page = DOCS / name / f"README{suffix()}.md"
-    print(f"  {page.relative_to(ROOT)}, {sum(1 for s in the_plan['steps'] if s['shot'])} pictures")
+    print(f"  {shown(page)}, {sum(1 for s in the_plan['steps'] if s['shot'])} pictures")
 
 
 def main() -> None:
@@ -917,9 +1092,14 @@ def main() -> None:
     p.add_argument("--lang", default="en", help="the language(s) of the narration and the page: en, de or en,de "
                    "(German: <name>.de.mp4, README.de.md)")
     p.add_argument("--fast", action="store_true", help="Kokoro instead of Fish Audio S2 Pro: fast, English only")
+    p.add_argument("--remix", action="store_true",
+                   help="the narration, subtitles and video again from <work>/<name>/recording and the cached "
+                   "sections: no app, nothing spoken")
+    p.add_argument("--out", help="the video, its narration and subtitles in OUT/<name>[.<lang>]/ (else the video "
+                   "beside the script)")
     a = p.parse_args()
     global WINDOW, DOCS, WORK, APP, APP_ARGS, APP_ENV, VOICE, VOICE_MODEL, VOICE_SETTINGS, VOICE_CACHE
-    global APP_NAME, VOICE_INTRO, FISH_PYTHON, VOICES, ENGINE, FAST
+    global APP_NAME, VOICE_INTRO, FISH_PYTHON, VOICES, ENGINE, FAST, REMIX, OUT
     WINDOW = a.window
     DOCS = (ROOT / a.tutorials).resolve()
     WORK = (ROOT / a.work).resolve()
@@ -941,6 +1121,10 @@ def main() -> None:
     APP_NAME = a.app_name
     VOICE_INTRO = False if a.no_voice_intro else (a.voice_intro or None)
     FAST = a.fast
+    REMIX = a.remix
+    OUT = (ROOT / a.out).resolve() if a.out else None
+    if REMIX and (a.dry_run or a.no_video):
+        fail("--remix makes the video: not with --dry-run or --no-video")
     langs = [x.strip() for x in a.lang.split(",") if x.strip()]
     for lang in langs:
         if lang not in LANGS:
@@ -949,7 +1133,7 @@ def main() -> None:
         removed, size = elevenlabs.Cache(VOICE_CACHE).prune(a.prune_voice_cache)
         print(f"{VOICE_CACHE}: {removed} entries removed, {size / 1e6:.1f} MB")
         return
-    if not a.dry_run:
+    if not a.dry_run and not REMIX:
         if not a.app:
             fail("--app names the app's executable")
         APP = (ROOT / a.app).resolve()

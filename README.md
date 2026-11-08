@@ -68,6 +68,15 @@ in German (`README.de.md`, `<name>.de.mp4`):
         [--no-voice] [--no-video] [--window] [--app-name NAME] \
         [--lang en|de|en,de] [--fast] [--voices DIR] [--voice V] [--dry-run] [NAME…]
 
+`--remix` makes the narration, the subtitles and the video again from a run
+already recorded (`<work>/<name>[.<lang>]/recording`, its `plan.json`) and
+the cached sections: the app is not started and nothing is spoken; a
+missing recording or section stops it. `--out DIR` writes the video, its
+`narration.wav` and `subtitles.srt` to `DIR/<name>[.<lang>]/` instead of
+beside the script and in the work folder:
+
+    python scripts/tutorial.py --remix --lang en,de [--out DIR] [NAME…]
+
 Tests: `python -m unittest discover scripts` with the venv's Python
 (PyYAML); no model is loaded, no paid API called.
 
@@ -240,6 +249,13 @@ never drift apart. A step lasts at least its narration, and as much longer
 as its words waited. The subtitles are the words spoken, a sentence at a
 time, when they are spoken. Cues go at the start of a sentence or a
 clause: words that wait are cut there.
+
+The cut is not at the cue word's time itself: forced alignment puts a word
+some 70 ms after it begins, so a cut there split the word, a fragment, the
+wait, then the rest. It is at the quietest point from 0.3 s before the
+word to 30 ms after it (10 ms frames), at the start of the quiet there:
+the pause before the word. Each piece is faded in and out over 6 ms, and
+the subtitles' words move from the same cut on.
 
 `shot: true` takes the step's picture where it stands in the actions: the
 moment that shows what the page's text says, rather than whatever the step
