@@ -30,7 +30,7 @@ script, for each tutorial named:
         [--voice-cache DIR] [--dry-run] [--prune-voice-cache DAYS]
         [--app-name NAME] [--voice-intro TEXT | --no-voice-intro]
         [--lang en|de|en,de] [--fast] [--engine E] [--voices DIR] [--fish-python PY]
-        [--remix] [--out DIR]
+        [--remix] [--out DIR] [--pronunciations DIR]
 
 What is said and what is seen go together: an action `cue: "Open it"`
 waits until the narration says those words (the times of its words, from
@@ -53,6 +53,21 @@ video again from a recording already made (`<work>/<name>/recording`, its
 `plan.json`) and the cached sections, without the app and without speaking
 anything. `--out DIR` writes the video and its narration and subtitles to
 `DIR/<name>[.<lang>]/` instead.
+
+A pronunciation list, `pronunciation.<lang>.yaml` beside the tutorials (or
+in `--pronunciations DIR`), says what the voice is given instead of what is
+written, so a script keeps its text as it should be read:
+
+    all:
+      - {from: "XY-Ebene", to: "Iks-Ypsilon-Ebene"}
+      - {regex: '\\bM(\\d+)\\.(\\d+)\\b', to: 'M \\1 Komma \\2'}
+    fish: []        # and elevenlabs, kokoro: after `all`, for that engine
+
+applied in order to each section's text as written (its Markdown gone),
+before the units, sizes and signs are read out (`READ_OUT`: "8 mm", "M3",
+"×"), right before it goes to the voice and so into its cache key. A
+cue's words are found with it applied to them too; the subtitles show
+what is written ("M2.5", "8 mm"), at the times of the words said for it.
 """
 
 import argparse
@@ -182,6 +197,11 @@ REMIX = False
 # The made files' folder (`--out`): else the video beside the script, its
 # narration and subtitles in the work folder.
 OUT: Path | None = None
+# The pronunciation lists' folder (`--pronunciations`): else the tutorials'.
+PRONUNCIATIONS: Path | None = None
+# What is replaced in this run's narration (its language and engine), set
+# by `narrate`: the cues' words are found with it too.
+PRONOUNCE: list = []
 
 def fail(message: str) -> None:
     sys.exit(f"tutorials: {message}")
@@ -284,20 +304,323 @@ def plain(markdown: str) -> str:
 
 
 def spoken(text: str) -> str:
-    """Text as a voice should read it: units and sizes spelled out."""
-    t = plain(text)
-    if LANG == "de":
-        t = re.sub(r"(\d)\s*mm\b", r"\1 Millimeter", t)
-        t = re.sub(r"(\d)\s*°", r"\1 Grad", t)
-        t = re.sub(r"\bM(\d)", r"M \1", t)
-        t = t.replace("×", "mal").replace("›", ",").replace("→", "zu")
-        return t.replace("JLCCNC", "JLC CNC")
-    t = re.sub(r"(\d)\s*mm\b", r"\1 millimeters", t)
-    t = re.sub(r"(\d)\s*°", r"\1 degrees", t)
-    t = re.sub(r"\bM(\d)", r"M \1", t)
-    t = t.replace("×", "by").replace("›", ",").replace("→", "to")
-    t = t.replace("JLCCNC", "JLC CNC").replace("aluminium", "aluminum")
-    return t
+    """Text as a voice should read it: units and sizes spelled out (no
+    pronunciation list: `pronounce`)."""
+    return pronounce(text, [])[0]
+
+
+# How every text is read after its pronunciation list, in each language:
+# units and sizes spelled out, signs as words (each a regex and its `to`).
+READ_OUT = {
+    "de": [
+        (r"(\d)\s*mm\b", r"\1 Millimeter"),
+        (r"(\d)\s*°", r"\1 Grad"),
+        (r"\bM(\d)", r"M \1"),
+        ("×", "mal"),
+        ("›", ","),
+        ("→", "zu"),
+        ("JLCCNC", "JLC CNC"),
+    ],
+    "en": [
+        (r"(\d)\s*mm\b", r"\1 millimeters"),
+        (r"(\d)\s*°", r"\1 degrees"),
+        (r"\bM(\d)", r"M \1"),
+        ("×", "by"),
+        ("›", ","),
+        ("→", "to"),
+        ("JLCCNC", "JLC CNC"),
+        ("aluminium", "aluminum"),
+    ],
+}
+
+
+# The sections of a pronunciation list: `all`, then the engine's own.
+PRONUNCIATION_SECTIONS = ("all", "elevenlabs", "fish", "kokoro")
+# The section of each engine (`speaker_of`'s backend).
+ENGINE_SECTION = {"elevenlabs": "elevenlabs", "fish-s2-pro": "fish", "kokoro": "kokoro"}
+# A replacement's `\1`, `\g<1>`, `\g<name>` or `\\`.
+TEMPLATE = re.compile(r"\\(?:(\d{1,2})|g<([^<>]*)>|(\\))")
+
+
+def word_char(c: str) -> bool:
+    """A character of a word, for a `from:`'s whole-word match."""
+    return c.isalnum() or c == "_"
+
+
+class Rule:
+    """One entry of a pronunciation list: `from:` a literal word or phrase
+    (whole words, case as written) or `regex:` (Python's syntax, `\\1` and
+    `\\g<name>` in `to:`), and what is said instead (`to:`)."""
+
+    def __init__(self, entry, where: str):
+        if not isinstance(entry, dict) or "to" not in entry or len(entry) != 2:
+            fail(f"{where}: an entry is {{from: …, to: …}} or {{regex: …, to: …}}, not {entry!r}")
+        kind = "from" if "from" in entry else "regex" if "regex" in entry else None
+        source, to = entry.get(kind), entry["to"]
+        if kind is None or not isinstance(source, str) or not source or not isinstance(to, str):
+            fail(f"{where}: an entry is {{from: …, to: …}} or {{regex: …, to: …}} with strings, not {entry!r}")
+        self.kind, self.source, self.to, self.where = kind, source, to, where
+        self.pattern = None
+        if kind == "regex":
+            try:
+                self.pattern = re.compile(source)
+            except re.error as e:
+                fail(f"{where}: regex {source!r}: {e}")
+        self.template = self.parsed(to)
+
+    def parsed(self, to: str) -> list:
+        """`to` as its parts: text, and the groups (a number or a name)."""
+        parts: list = []
+        at = 0
+        for m in TEMPLATE.finditer(to):
+            if "\\" in to[at : m.start()]:
+                fail(f"{self.where}: to {to!r}: only \\1, \\g<name> and \\\\ after a backslash")
+            parts.append(to[at : m.start()])
+            if m.group(3):
+                parts.append("\\")
+            else:
+                group = m.group(1) or m.group(2)
+                group = int(group) if group.isdigit() else group
+                if self.kind == "from" or (
+                    self.pattern is not None
+                    and (group > self.pattern.groups if isinstance(group, int) else group not in self.pattern.groupindex)
+                ):
+                    fail(f"{self.where}: to {to!r}: no group {group} in what it replaces")
+                parts.append((group,))
+            at = m.end()
+        if "\\" in to[at:]:
+            fail(f"{self.where}: to {to!r}: only \\1, \\g<name> and \\\\ after a backslash")
+        parts.append(to[at:])
+        return parts
+
+    def spans(self, text: str) -> list[tuple[int, int, str]]:
+        """Where it replaces in `text`, in order, and with what."""
+        out = []
+        if self.kind == "from":
+            phrase = self.source
+            i = 0
+            while (k := text.find(phrase, i)) >= 0:
+                e = k + len(phrase)
+                if (not word_char(phrase[0]) or k == 0 or not word_char(text[k - 1])) and (
+                    not word_char(phrase[-1]) or e == len(text) or not word_char(text[e])
+                ):
+                    out.append((k, e, self.to))
+                    i = e
+                else:
+                    i = k + 1
+            return out
+        for m in self.pattern.finditer(text):
+            if m.end() > m.start():
+                said = "".join(p if isinstance(p, str) else (m.group(p[0]) or "") for p in self.template)
+                out.append((m.start(), m.end(), said))
+        return out
+
+
+def pronunciation_path(lang: str) -> Path:
+    """The pronunciation list of `lang`: `pronunciation.<lang>.yaml` in
+    `--pronunciations`, else beside the tutorials."""
+    return (PRONUNCIATIONS or DOCS) / f"pronunciation.{lang}.yaml"
+
+
+def load_pronunciations(path: Path) -> dict[str, list[Rule]]:
+    """A pronunciation list's sections, each its rules; none when there is
+    no file."""
+    if not path.exists():
+        return {}
+    import yaml
+
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        fail(f"{path}: sections {', '.join(PRONUNCIATION_SECTIONS)}, each a list")
+    out = {}
+    for section, entries in data.items():
+        if section not in PRONUNCIATION_SECTIONS:
+            fail(f"{path}: section {section!r}: one of {', '.join(PRONUNCIATION_SECTIONS)}")
+        if entries is not None and not isinstance(entries, list):
+            fail(f"{path}: {section}: a list")
+        out[section] = [Rule(e, f"{path.name}: {section} {k + 1}") for k, e in enumerate(entries or [])]
+    return out
+
+
+LOADED_PRONUNCIATIONS: dict[Path, dict[str, list[Rule]]] = {}
+
+
+def rules_for(lang: str, backend: str | None) -> list[Rule]:
+    """What is replaced for `backend` in `lang`: `all`, then the engine's
+    own section (only `all` without a voice)."""
+    path = pronunciation_path(lang)
+    if path not in LOADED_PRONUNCIATIONS:
+        LOADED_PRONUNCIATIONS[path] = load_pronunciations(path)
+    sections = LOADED_PRONUNCIATIONS[path]
+    return sections.get("all", []) + (sections.get(ENGINE_SECTION.get(backend or ""), []) if backend else [])
+
+
+def replaced(atoms: list[tuple[str, str, bool]], spans: list[tuple[int, int, str]]) -> list[tuple[str, str, bool]]:
+    """`atoms` (each said, written, and whether replaced: a character as
+    written, or a replacement) with `spans` of what they say replaced. A
+    span that takes part of a replacement takes all of it."""
+    starts = []
+    at = 0
+    for said, _, _ in atoms:
+        starts.append(at)
+        at += len(said)
+    owner = [i for i, (said, _, _) in enumerate(atoms) for _ in said]
+    text = "".join(said for said, _, _ in atoms)
+    groups: list[list] = []
+    for a, b, to in spans:
+        i0, i1 = owner[a], owner[b - 1] + 1
+        if groups and i0 < groups[-1][1]:
+            groups[-1][1] = max(groups[-1][1], i1)
+            groups[-1][2].append((a, b, to))
+        else:
+            groups.append([i0, i1, [(a, b, to)]])
+    out = []
+    i = 0
+    for i0, i1, inner in groups:
+        out.extend(atoms[i:i0])
+        at = starts[i0]
+        said = []
+        for a, b, to in inner:
+            said += [text[at:a], to]
+            at = b
+        said.append(text[at : starts[i1 - 1] + len(atoms[i1 - 1][0])])
+        out.append(("".join(said), "".join(w for _, w, _ in atoms[i0:i1]), True))
+        i = i1
+    out.extend(atoms[i:])
+    return out
+
+
+READ_OUT_RULES: dict[str, list[Rule]] = {}
+
+
+def read_out(lang: str) -> list[Rule]:
+    """`READ_OUT` of `lang` as rules."""
+    if lang not in READ_OUT_RULES:
+        READ_OUT_RULES[lang] = [
+            Rule({"regex": pattern, "to": to}, f"READ_OUT {lang} {k + 1}")
+            for k, (pattern, to) in enumerate(READ_OUT[lang])
+        ]
+    return READ_OUT_RULES[lang]
+
+
+def pronounce(
+    text: str, rules: list[Rule], hits: dict | None = None, lang: str | None = None
+) -> tuple[str, list[tuple[str, str, bool]]]:
+    """Markdown `text` as the voice is given it: as text (`plain`), each of
+    `rules` (a pronunciation list's) applied in order to what the ones
+    before made, then units, sizes and signs read out (`READ_OUT`); and
+    its pieces (said, written, replaced), whose written parts are the
+    text as written (`plain`)."""
+    written = plain(text)
+    atoms = [(c, c, False) for c in written]
+    for k, rule in enumerate(rules + read_out(lang or LANG)):
+        spans = rule.spans("".join(said for said, _, _ in atoms))
+        if spans:
+            atoms = replaced(atoms, spans)
+            if hits is not None and k < len(rules):
+                hits[rule] = hits.get(rule, 0) + len(spans)
+    pieces: list[tuple[str, str, bool]] = []
+    for said, written, again in atoms:
+        if not again and pieces and not pieces[-1][2]:
+            pieces[-1] = (pieces[-1][0] + said, pieces[-1][1] + written, False)
+        else:
+            pieces.append((said, written, again))
+    return "".join(said for said, _, _ in pieces), pieces
+
+
+def said_text(text: str, backend: str | None, lang: str | None = None) -> str:
+    """A section's text as `backend` is given it in `lang`: `spoken`, with
+    the pronunciation list."""
+    return pronounce(text, rules_for(lang or LANG, backend), lang=lang)[0]
+
+
+def written_words(words: list[dict], pieces: list[tuple[str, str, bool]]) -> list[dict]:
+    """The words spoken of a replaced text, for the subtitles: the words of
+    a replacement shown as what was written, its first word with it
+    (`shown`, `shown_space`) and the others with nothing. A replacement by
+    nothing goes with the word before it."""
+    if not any(again for _, _, again in pieces):
+        return words
+    said = "".join(s for s, _, _ in pieces)
+    # Each piece's span in what is said.
+    spans = []
+    at = 0
+    for s, w, again in pieces:
+        spans.append((at, at + len(s), w, again))
+        at += len(s)
+    located: list[tuple[int, int] | None] = []
+    at = 0
+    for w in words:
+        k = said.find(w["text"], at) if w["text"] else -1
+        if k < 0:
+            located.append(None)
+        else:
+            located.append((k, k + len(w["text"])))
+            at = k + len(w["text"])
+    # A word's range in what is said, grown to the replacements it is in.
+    ranges: list[tuple[int, int] | None] = []
+    for loc in located:
+        if loc is None:
+            ranges.append(None)
+            continue
+        lo, hi = loc
+        for ps, pe, _, again in spans:
+            if again and ps < pe and ps < loc[1] and pe > loc[0]:
+                lo, hi = min(lo, ps), max(hi, pe)
+        ranges.append((lo, hi))
+    # A replacement by nothing: with the word that ends before it.
+    for ps, pe, _, again in spans:
+        if again and ps == pe:
+            before = [k for k, r in enumerate(ranges) if r is not None and r[1] <= ps]
+            if before:
+                k = before[-1]
+                ranges[k] = (ranges[k][0], ps)
+
+    def written(lo: int, hi: int) -> str:
+        out = []
+        for ps, pe, w, again in spans:
+            if again:
+                if (ps < pe and ps < hi and pe > lo) or (ps == pe and lo < ps <= hi):
+                    out.append(w)
+            elif ps < hi and pe > lo:
+                out.append(w[max(lo, ps) - ps : min(hi, pe) - ps])
+        return "".join(out)
+
+    full = "".join(w for _, _, w, _ in spans)
+
+    def written_at(p: int) -> int:
+        """Where the said position `p` is in what is written (a
+        replacement's end at its written end)."""
+        at = 0
+        for ps, pe, w, again in spans:
+            if ps <= p <= pe and (not again or p == pe):
+                return at + (len(w) if again else p - ps)
+            at += len(w)
+        return at
+
+    out = [dict(w) for w in words]
+    k = 0
+    while k < len(out):
+        r = ranges[k]
+        if r is None or written(*r) == words[k]["text"]:
+            k += 1
+            continue
+        # The words that share its replacements.
+        last = k
+        lo, hi = r
+        while last + 1 < len(out) and ranges[last + 1] is not None and ranges[last + 1][0] < hi:
+            last += 1
+            hi = max(hi, ranges[last][1])
+        out[k]["shown"] = written(lo, hi)
+        # A space after it where what is written has one ("M3-Schrauben"
+        # is said "Em 3 Schrauben").
+        after = written_at(hi)
+        out[k]["shown_space"] = full[after].isspace() if after < len(full) else words[last]["space"]
+        for j in range(k + 1, last + 1):
+            out[j]["shown"] = ""
+        k = last + 1
+    return out
 
 
 def shot_name(i: int, step: dict) -> str | None:
@@ -495,7 +818,8 @@ def voice_intro(script: dict) -> str | None:
     if said is None or said is True:
         said = VOICE_INTRO or text("intro", app="{app}")
     app = str(script.get("app") or APP_NAME or text("the_app")).strip()
-    return spoken(str(said).replace("{app}", app)) or None
+    # As written: `narrate` makes it spoken.
+    return str(said).replace("{app}", app) if plain(str(said)) else None
 
 
 def join_wavs(parts: list[tuple[Path, float]], out: Path) -> None:
@@ -521,11 +845,27 @@ def narrate(name: str, script: dict, voice: bool, speaker: dict | None = None, n
     its `seconds` and its `words`, each with when it starts and ends. The
     first step's starts with the AI voice's own notice (`voice_intro`):
     `lead` is how many of its words are that notice's, which cues skip."""
+    global PRONOUNCE
     out = []
     if voice and narrator is None:
         narrator = speaker["narrator"]()
+    # The pronunciation list: what the voice is given instead of what is
+    # written, for its engine; the subtitles show what is written.
+    PRONOUNCE = rules_for(LANG, speaker["backend"] if voice and speaker else None)
+    hits: dict = {}
+    sections = 0
+    hit_sections = 0
+
+    def said(text: str) -> tuple[str, list]:
+        nonlocal sections, hit_sections
+        before = sum(hits.values())
+        said, pieces = pronounce(text, PRONOUNCE, hits)
+        sections += bool(said)
+        hit_sections += sum(hits.values()) > before
+        return said, pieces
+
     for i, step in enumerate(script["steps"]):
-        text = spoken(step.get("say") or step.get("text", ""))
+        text, pieces = said(step.get("say") or step.get("text", ""))
         if not text:
             out.append({"wav": None, "seconds": 0.0, "words": [], "lead": 0})
             continue
@@ -534,16 +874,18 @@ def narrate(name: str, script: dict, voice: bool, speaker: dict | None = None, n
                 {
                     "wav": None,
                     "seconds": len(elevenlabs.untagged(text).split()) / WORDS_PER_SECOND,
-                    "words": guessed_words(elevenlabs.untagged(text)),
+                    "words": written_words(guessed_words(elevenlabs.untagged(text)), pieces),
                     "lead": 0,
                 }
             )
             continue
         wav, seconds, words = narrator.say(text)
-        out.append({"wav": wav, "seconds": seconds, "words": words, "lead": 0})
+        out.append({"wav": wav, "seconds": seconds, "words": written_words(words, pieces), "lead": 0})
     intro = voice_intro(script) if voice and out else None
     if intro:
+        intro, pieces = said(intro)
         wav, seconds, words = narrator.say(intro)
+        words = written_words(words, pieces)
         first = out[0]
         shift = seconds + INTRO_PAUSE
         joined = made_dir(name) / "first-step.wav"
@@ -558,6 +900,12 @@ def narrate(name: str, script: dict, voice: bool, speaker: dict | None = None, n
             + [dict(w, start=round(w["start"] + shift, 3), end=round(w["end"] + shift, 3)) for w in first["words"]],
             "lead": len(words),
         }
+    if PRONOUNCE:
+        print(
+            f"  {pronunciation_path(LANG).name}: {sum(hits.values())} replacements in {hit_sections} of "
+            f"{sections} sections",
+            flush=True,
+        )
     if voice:
         print(f"  {narrator.report()}", flush=True)
         close = getattr(narrator, "close", None)
@@ -573,8 +921,9 @@ def normal(text: str) -> list[str]:
 
 def find_words(words: list[dict], phrase: str, after: int) -> tuple[int, int] | None:
     """Where `phrase` is said in `words`, from the word `after` on: the
-    index of its first word and of the word after its last."""
-    want = normal(spoken(phrase))
+    index of its first word and of the word after its last. The phrase is
+    written, the words said: the pronunciation list is applied to it too."""
+    want = normal(pronounce(phrase, PRONOUNCE)[0])
     if not want:
         return None
     # Each compared word with the index of the spoken word it is part of.
@@ -602,6 +951,7 @@ def cue_actions(name: str, i: int, step: dict, words: list[dict], lead: int = 0)
                 fail(
                     f"{name}: step {i + 1} ({step['name']}): the cue {a['cue']!r} is not in "
                     "what it says, or not after the cue before it"
+                    + (f" (said with {pronunciation_path(LANG).name} applied)" if PRONOUNCE else "")
                 )
             first, after = found
             out.append({"cue": words[first]["start"], "words": a["cue"]})
@@ -829,14 +1179,19 @@ def place_narration(track, data, rate: int, start: float, cues: list[tuple[float
 def subtitles_of(words: list[dict], cues: list[tuple[float, float]]) -> list[tuple[float, float, str]]:
     """A step's subtitles from its words, as (start, end, text) in seconds
     from the step's start: what is said, when it is said. One ends at a
-    sentence's end, where a cue moves the words, or at a comma once long."""
+    sentence's end, where a cue moves the words, or at a comma once long.
+    A replaced word is shown as written (`written_words`)."""
     out = []
     group: list[dict] = []
 
     def close():
         if not group:
             return
-        text = "".join(w["text"] + (" " if w["space"] else "") for w in group).strip()
+        text = "".join(
+            w.get("shown", w["text"]) + (" " if w.get("shown_space", w["space"]) else "")
+            for w in group
+            if w.get("shown", w["text"])
+        ).strip()
         if text:
             first, last = group[0], group[-1]
             out.append(
@@ -853,7 +1208,8 @@ def subtitles_of(words: list[dict], cues: list[tuple[float, float]]) -> list[tup
             close()
         group.append(w)
         length = sum(len(x["text"]) + 1 for x in group)
-        end = w["text"] in (".", "!", "?") or (length >= SUBTITLE_CHARS and w["text"] in (",", ";", ":"))
+        mark = w.get("shown", w["text"])
+        end = mark in (".", "!", "?") or (length >= SUBTITLE_CHARS and mark in (",", ";", ":"))
         if end or i + 1 == len(words):
             close()
     # Each shown until the next comes.
@@ -1036,6 +1392,11 @@ def build(name: str, voice: bool, with_video: bool, dry_run: bool = False, lang:
     except elevenlabs.SpeechError as e:
         fail(f"{name}: {e}")
     if dry_run:
+        # Each cue found in what the voice will be given (its words timed
+        # by their count): a pronunciation that hides one stops it here.
+        for i, step in enumerate(script["steps"]):
+            said = pronounce(step.get("say") or step.get("text", ""), PRONOUNCE)[0]
+            cue_actions(name, i, step, guessed_words(elevenlabs.untagged(said)))
         return
     the_plan = plan(name, script, audio, with_video, voice, speaker)
     timeline = play(name, the_plan)
@@ -1095,11 +1456,13 @@ def main() -> None:
     p.add_argument("--remix", action="store_true",
                    help="the narration, subtitles and video again from <work>/<name>/recording and the cached "
                    "sections: no app, nothing spoken")
+    p.add_argument("--pronunciations", metavar="DIR",
+                   help="the folder of the pronunciation lists, pronunciation.<lang>.yaml (else --tutorials)")
     p.add_argument("--out", help="the video, its narration and subtitles in OUT/<name>[.<lang>]/ (else the video "
                    "beside the script)")
     a = p.parse_args()
     global WINDOW, DOCS, WORK, APP, APP_ARGS, APP_ENV, VOICE, VOICE_MODEL, VOICE_SETTINGS, VOICE_CACHE
-    global APP_NAME, VOICE_INTRO, FISH_PYTHON, VOICES, ENGINE, FAST, REMIX, OUT
+    global APP_NAME, VOICE_INTRO, FISH_PYTHON, VOICES, ENGINE, FAST, REMIX, OUT, PRONUNCIATIONS
     WINDOW = a.window
     DOCS = (ROOT / a.tutorials).resolve()
     WORK = (ROOT / a.work).resolve()
@@ -1123,6 +1486,7 @@ def main() -> None:
     FAST = a.fast
     REMIX = a.remix
     OUT = (ROOT / a.out).resolve() if a.out else None
+    PRONUNCIATIONS = (ROOT / a.pronunciations).resolve() if a.pronunciations else None
     if REMIX and (a.dry_run or a.no_video):
         fail("--remix makes the video: not with --dry-run or --no-video")
     langs = [x.strip() for x in a.lang.split(",") if x.strip()]

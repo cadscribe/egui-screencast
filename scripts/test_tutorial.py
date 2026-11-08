@@ -3,6 +3,8 @@
     python -m unittest discover scripts   # with the venv's Python (PyYAML)
 """
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -401,3 +403,204 @@ class Names(unittest.TestCase):
             }
             hidden += [f"{f.name}: {n}" for n in bound & called & functions]
         self.assertEqual(hidden, [])
+
+
+def old_spoken(text: str, lang: str) -> str:
+    """`tutorial.spoken` of 0.4.2, before the pronunciation list: the
+    sections' keys must stay."""
+    import re
+
+    t = tutorial.plain(text)
+    if lang == "de":
+        t = re.sub(r"(\d)\s*mm\b", r"\1 Millimeter", t)
+        t = re.sub(r"(\d)\s*°", r"\1 Grad", t)
+        t = re.sub(r"\bM(\d)", r"M \1", t)
+        t = t.replace("×", "mal").replace("›", ",").replace("→", "zu")
+        return t.replace("JLCCNC", "JLC CNC")
+    t = re.sub(r"(\d)\s*mm\b", r"\1 millimeters", t)
+    t = re.sub(r"(\d)\s*°", r"\1 degrees", t)
+    t = re.sub(r"\bM(\d)", r"M \1", t)
+    t = t.replace("×", "by").replace("›", ",").replace("→", "to")
+    return t.replace("JLCCNC", "JLC CNC").replace("aluminium", "aluminum")
+
+
+class Pronunciation(unittest.TestCase):
+    """The pronunciation list: what the voice is given instead of what is
+    written, for each engine; cues found and subtitles shown as written."""
+
+    LIST = r"""
+all:
+  - {from: "XY-Ebene", to: "Iks-Ypsilon-Ebene"}
+  - {from: "z. B.", to: "zum Beispiel"}
+  - {regex: '\bM(\d+)\.(\d+)\b', to: 'M \1 Komma \2'}
+fish:
+  - {from: "Ebene", to: "Ebehne"}
+elevenlabs:
+  - {from: "Skizze", to: "Skitze"}
+kokoro: []
+"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        (self.dir / "pronunciation.de.yaml").write_text(self.LIST, encoding="utf-8")
+        for p in (
+            mock.patch.object(tutorial, "PRONUNCIATIONS", self.dir),
+            mock.patch.object(tutorial, "WORK", self.dir),
+            mock.patch.object(tutorial, "LANG", "de"),
+            mock.patch.object(tutorial, "PRONOUNCE", []),
+            mock.patch.object(tutorial, "VOICE_INTRO", False),
+            mock.patch.dict(tutorial.LOADED_PRONUNCIATIONS, clear=True),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def said(self, text: str, backend: str | None = "kokoro") -> str:
+        return tutorial.said_text(text, backend, "de")
+
+    def test_a_literal_is_whole_words_and_its_case(self):
+        self.assertEqual(self.said("Die XY-Ebene, z. B. hier."), "Die Iks-Ypsilon-Ebene, zum Beispiel hier.")
+        # Not inside another word, not in another case.
+        self.assertEqual(self.said("Die XY-Ebenen und die xy-ebene."), "Die XY-Ebenen und die xy-ebene.")
+        self.assertEqual(self.said("AXY-Ebene"), "AXY-Ebene")
+        # A phrase that ends in a mark needs no word's end after it.
+        self.assertEqual(self.said("z. B.Test"), "zum BeispielTest")
+
+    def test_a_regex_with_its_groups(self):
+        self.assertEqual(self.said("Eine M2.5-Schraube"), "Eine M 2 Komma 5-Schraube")
+        # On the text as written, before the units are read out: "M3" then
+        # is "M 3", "8 mm" "8 Millimeter".
+        self.assertEqual(self.said("M10.25 und M3, **8 mm**"), "M 10 Komma 25 und M 3, 8 Millimeter")
+
+    def test_spoken_is_as_it_was_without_a_list(self):
+        texts = [
+            "Extrude by **10 mm**, [pause] then turn it 90° and use an M3 screw: 20 × 30 → done.",
+            "A `code` mark, _emphasis_, a [link](https://example.org) and ![a picture](x.png).\n\n- a point",
+            "JLCCNC cuts aluminium; it’s 3.5 mm  thick. Datei › Neu, M12x1.5, 5mm",
+        ]
+        for lang in ("en", "de"):
+            for t in texts:
+                with mock.patch.object(tutorial, "LANG", lang):
+                    self.assertEqual(tutorial.spoken(t), old_spoken(t, lang))
+
+    def test_each_engine_after_all(self):
+        text = "Die XY-Ebene und eine Ebene, eine Skizze."
+        self.assertEqual(self.said(text, "kokoro"), "Die Iks-Ypsilon-Ebene und eine Ebene, eine Skizze.")
+        # `all` first: S2 Pro's own `Ebene` then finds the one `all` made too.
+        self.assertEqual(self.said(text, "fish-s2-pro"), "Die Iks-Ypsilon-Ebehne und eine Ebehne, eine Skizze.")
+        self.assertEqual(self.said(text, "elevenlabs"), "Die Iks-Ypsilon-Ebene und eine Ebene, eine Skitze.")
+        # Without a voice, only `all`.
+        self.assertEqual(self.said(text, None), "Die Iks-Ypsilon-Ebene und eine Ebene, eine Skizze.")
+        # No list in a language: nothing replaced.
+        self.assertEqual(tutorial.said_text("Die XY-Ebene", "kokoro", "en"), "Die XY-Ebene")
+
+    def test_a_bad_list_stops_the_build(self):
+        for bad in (
+            "fishaudio: []",
+            "all: [{from: a}]",
+            "all: [{from: a, regex: b, to: c}]",
+            "all: [{regex: '(', to: c}]",
+            "all: [{regex: 'a(b)', to: '\\2'}]",
+            "all: [{from: a, to: '\\1'}]",
+            "all: [{regex: 'a', to: '\\n'}]",
+        ):
+            (self.dir / "pronunciation.en.yaml").write_text(bad, encoding="utf-8")
+            tutorial.LOADED_PRONUNCIATIONS.clear()
+            with self.assertRaises(SystemExit, msg=bad):
+                tutorial.rules_for("en", "kokoro")
+
+    def test_the_voice_gets_the_replaced_text_and_cues_find_it(self):
+        narrator = FakeNarrator(self.dir)
+        script = {
+            "title": "T",
+            "steps": [
+                {
+                    "name": "a",
+                    "say": "Wähle die XY-Ebene. Dann zeichne.",
+                    "actions": [{"cue": "die XY-Ebene"}, {"cue": "Dann"}],
+                },
+            ],
+        }
+        audio = tutorial.narrate("t", script, True, {"backend": "kokoro"}, narrator)
+        self.assertEqual(narrator.said, ["Wähle die Iks-Ypsilon-Ebene. Dann zeichne."])
+        actions = tutorial.cue_actions("t", 0, script["steps"][0], audio[0]["words"])
+        # "die" is the second mark, "Dann" the fifth: Wähle die Iks-Ypsilon-Ebene . Dann
+        self.assertEqual(actions[0], {"cue": 0.5, "words": "die XY-Ebene"})
+        self.assertEqual(actions[1]["cue"], 2.0)
+
+    def test_subtitles_show_what_is_written(self):
+        narrator = FakeNarrator(self.dir)
+        script = {"title": "T", "steps": [{"name": "a", "say": "Nimm z. B. eine M2.5-Schraube. Fertig."}]}
+        audio = tutorial.narrate("t", script, True, {"backend": "fish-s2-pro"}, narrator)
+        self.assertEqual(narrator.said, ["Nimm zum Beispiel eine M 2 Komma 5-Schraube. Fertig."])
+        subs = tutorial.subtitles_of(audio[0]["words"], [])
+        self.assertEqual([t for _, _, t in subs], ["Nimm z. B. eine M2.5-Schraube.", "Fertig."])
+        # Timed by the words said: from "Nimm" to the "." after "Schraube".
+        said = words(narrator.said[0])
+        self.assertEqual(subs[0][0], said[0]["start"])
+        self.assertEqual(subs[1][0], said[-2]["start"])
+
+    def test_back_to_what_is_written_word_by_word(self):
+        rules = tutorial.rules_for("de", "fish-s2-pro")
+        said, pieces = tutorial.pronounce("Die XY-Ebene, z. B. hier", rules)
+        self.assertEqual(said, "Die Iks-Ypsilon-Ebehne, zum Beispiel hier")
+        self.assertEqual("".join(w for _, w, _ in pieces), "Die XY-Ebene, z. B. hier")
+        spoken_words = [
+            {"text": t, "start": float(i), "end": i + 1.0, "space": s}
+            for i, (t, s) in enumerate(
+                [("Die", True), ("Iks-Ypsilon-Ebehne", False), (",", True), ("zum", True), ("Beispiel", True),
+                 ("hier", False)]
+            )
+        ]
+        shown = tutorial.written_words(spoken_words, pieces)
+        self.assertEqual([w.get("shown", w["text"]) for w in shown], ["Die", "XY-Ebene", ",", "z. B.", "", "hier"])
+        self.assertTrue(shown[3]["shown_space"])
+        # The said words stay, for the cues.
+        self.assertEqual([w["text"] for w in shown], [w["text"] for w in spoken_words])
+
+    def test_a_space_said_but_not_written(self):
+        import align
+
+        (self.dir / "pronunciation.en.yaml").write_text(
+            "all:\n  - {regex: '\\bM(\\d+)-', to: 'Em \\1 '}\n", encoding="utf-8"
+        )
+        said, pieces = tutorial.pronounce("Two M3-screws hold it.", tutorial.rules_for("en", None), lang="en")
+        self.assertEqual(said, "Two Em 3 screws hold it.")
+        said_words = [dict(t, start=float(k), end=k + 1.0) for k, t in enumerate(align.tokens_of(said))]
+        subs = tutorial.subtitles_of(tutorial.written_words(said_words, pieces), [])
+        self.assertEqual(subs[0][2], "Two M3-screws hold it.")
+
+    def test_a_rule_over_a_replacement_takes_it_whole(self):
+        (self.dir / "pronunciation.en.yaml").write_text(
+            "all:\n  - {from: CAD, to: C A D}\n  - {regex: 'A D file', to: 'A D data'}\n", encoding="utf-8"
+        )
+        said, pieces = tutorial.pronounce("A CAD file.", tutorial.rules_for("en", None))
+        self.assertEqual(said, "A C A D data.")
+        self.assertEqual(pieces, [("A ", "A ", False), ("C A D data", "CAD file", True), (".", ".", False)])
+
+    def test_the_key_changes_only_where_a_rule_replaces(self):
+        import elevenlabs
+        import narrate
+
+        untouched, touched = "Zeichne eine Lini.", "Wähle die XY-Ebene."
+        voice = elevenlabs.Voice("v")
+        for backend in ("kokoro", "fish-s2-pro", "elevenlabs"):
+            self.assertEqual(narrate.key(self.said(untouched, backend), "am_michael", 1.0),
+                             narrate.key(untouched, "am_michael", 1.0))
+            self.assertEqual(voice.key(self.said(untouched, backend)), voice.key(untouched))
+            self.assertNotEqual(voice.key(self.said(touched, backend)), voice.key(touched))
+        # An engine's own rule changes only that engine's key.
+        self.assertEqual(voice.key(self.said("Eine Skizze.", "kokoro")), voice.key("Eine Skizze."))
+        self.assertNotEqual(voice.key(self.said("Eine Skizze.", "elevenlabs")), voice.key("Eine Skizze."))
+
+    def test_the_run_says_how_many_replaced(self):
+        narrator = FakeNarrator(self.dir)
+        script = {
+            "title": "T",
+            "steps": [{"name": "a", "say": "Die XY-Ebene, die XY-Ebene."}, {"name": "b", "say": "Nichts."}],
+        }
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            tutorial.narrate("t", script, True, {"backend": "kokoro"}, narrator)
+        self.assertIn("pronunciation.de.yaml: 2 replacements in 1 of 2 sections", out.getvalue())

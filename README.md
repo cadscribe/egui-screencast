@@ -261,6 +261,42 @@ the subtitles' words move from the same cut on.
 moment that shows what the page's text says, rather than whatever the step
 ends on.
 
+## Pronunciation
+
+Some written words come out wrong from a voice: "XY-Ebene", "M2,5", "3MF".
+The script keeps them as they should be read, and a pronunciation list
+beside the tutorials says what the voice is given instead:
+`<tutorials>/pronunciation.<lang>.yaml` (`pronunciation.de.yaml`,
+`pronunciation.en.yaml`), or in `--pronunciations DIR`.
+
+```yaml
+all:                              # for every voice, in this order
+  - {from: "XY-Ebene", to: "Iks-Ypsilon-Ebene"}
+  - {regex: '\bM(\d+),(\d+)\b', to: 'Em \1 Komma \2'}
+elevenlabs: []                    # then the engine's own: elevenlabs,
+fish:                             # fish (S2 Pro), kokoro
+  - {from: "Skizze", to: "Skitze"}
+```
+
+- `from:` is a word or phrase as written, matched whole (not inside a
+  longer word) and in its case; `regex:` is a Python regex, its groups
+  `\1` or `\g<name>` in `to:` (and `\\` a backslash).
+- Each entry is applied in order to the text the ones before made: the
+  engine's section after `all`. Without a voice (`--no-voice`), only `all`.
+- They see the step's text as written, its Markdown gone, before the
+  runner reads out units, sizes and signs ("8 mm", "M3", "×").
+- What the voice is given is what its cache keeps a section by: an entry
+  changes the key only of the sections it replaces in.
+- A cue is written as the script is: its words get the same replacements
+  before they are looked for in what is said.
+- The subtitles show what is written. Each spoken word is found in the
+  text the voice was given; the words of a replacement show its written
+  words, at the times they were said.
+
+Each run says how many replacements it made, and a `--dry-run` also looks
+for every cue in what the voice would be given, so a replacement that
+hides a cue's words stops the run before anything is spoken.
+
 ## An AI voice, said so
 
 The narration is synthetic speech (Kokoro, ElevenLabs or Fish Audio S2
