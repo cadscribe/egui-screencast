@@ -1,0 +1,19 @@
+# The German list of the test tutorials: every kind of entry (number
+# words too), every engine's section.
+all:
+  - {from: "XY-Ebene", to: "Iks-Ypsilon-Ebene"}
+  - {from: "z. B.", to: "zum Beispiel"}
+  - {regex: '\bM(\d+),(\d+)\b', to: 'Em \1 Komma \2'}
+  - {regex: '\bM(\d+)-', to: 'Em \1 '}
+  - {regex: '\b(\d+),(\d)(\d)\b', to: '\1 Komma \2 \3'}
+  - {from: "z", to: "Zett"}
+  - {from: "JLCCNC", to: "J L C C N C"}
+  - {from: "Ö", to: "Oe"}
+  - {regex: '\b(ISO|DIN) (?P<n>\d+)\b', to: '\1 \g<n>', words: [2]}
+  - {regex: '\b(\d+) Teile', to: '\1 Teile', words: [1]}
+  - {from: "ISO", to: "Iso"}
+fish:
+  - {from: "Ebene", to: "Ebehne"}
+elevenlabs:
+  - {from: "Skizze", to: "Skitze"}
+kokoro:

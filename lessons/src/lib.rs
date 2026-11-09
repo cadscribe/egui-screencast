@@ -2,15 +2,18 @@
 //! [egui-screencast](https://github.com/cadscribe/egui-screencast)'s
 //! tutorial scripts, played in the app itself.
 //!
-//! This release (stage 1) holds the narration: a lesson's step read aloud
-//! by the voice its recordings spoke ([`voice::Speaker`]), the keys the
-//! recorder keeps a spoken section by ([`voice::key`]), the caches and
-//! voices found on the machine, a worker that speaks ahead with a local
-//! voice, the course's sections downloaded once as a bundle, the player
-//! with its progress bar and the speaker's level, and the voice's row in
-//! the lesson pane (feature `ui`). The app still says what each step says
-//! ([`voice::Narrate`]); the script format, the hints and the pane follow
-//! in later releases.
+//! It holds the script format ([`script`]: a course and its steps in a
+//! language, cues checked against what they say, the app's own keys of a
+//! step as its [`script::Extra`]; `FORMAT.md` says every key), the text as
+//! the voice says it ([`spoken`], [`pronounce`]) and the narration: a
+//! lesson's step read aloud by the voice its recordings spoke
+//! ([`voice::Speaker`]), what each step says ([`voice::narration`]), the
+//! keys the recorder keeps a spoken section by ([`voice::key`]), the
+//! caches and voices found on the machine, a worker that speaks ahead with
+//! a local voice (or the app's own remote one), the course's sections
+//! downloaded once as a bundle, the player with its progress bar and the
+//! speaker's level, and the voice's row in the lesson pane (feature `ui`).
+//! The hints and the pane follow in later releases.
 //!
 //! The app gives its names and places once, as a [`Config`]:
 //!
@@ -27,7 +30,12 @@
 //! assert_eq!(CONFIG.lower(), "myapp");
 //! ```
 
+pub mod pronounce;
+pub mod script;
+pub mod spoken;
 pub mod voice;
+
+pub use script::{Course, Embedded, Extra, Step};
 
 /// The language the lessons speak and show: opencad-ui's, so that the app
 /// and the lessons share one language state (`lang()`, `set_lang`).

@@ -1,7 +1,8 @@
 //! The sections asked to be spoken, one at a time on a thread of their own
 //! (ADR 0056): the list asked last replaces the one before, the step shown
-//! first; what is spoken goes into the app's cache and is said back.
-//! Dropped, the queue kills its worker.
+//! first; what is spoken goes into the app's cache (a remote section into
+//! the lasting cache, where one is given) and is said back. Dropped, the
+//! queue kills its worker.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -11,11 +12,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 
-use super::{Section, cache};
+use super::{Section, Speech, cache};
 
 /// What speaks a section into a WAV: the worker process, or a test's.
 pub trait Synth: Send {
-    /// `section` spoken into `out`, a 16-bit WAV.
+    /// `section` spoken into `out`: a 16-bit WAV, or AAC in an MP4 (told
+    /// by its bytes, whatever `out` is called).
     ///
     /// # Errors
     ///
@@ -67,13 +69,25 @@ impl std::fmt::Debug for Queue {
 impl Queue {
     /// A queue of the app `app` speaking by `synth` into `root`.
     pub fn new(app: &str, root: PathBuf, synth: Box<dyn Synth>, kill: Kill) -> Queue {
+        Queue::keeping(app, root, None, synth, kill)
+    }
+
+    /// A queue as [`Queue::new`] that keeps the remote sections
+    /// ([`Speech::Remote`]) in `lasting`, where one is given.
+    pub fn keeping(
+        app: &str,
+        root: PathBuf,
+        lasting: Option<PathBuf>,
+        synth: Box<dyn Synth>,
+        kill: Kill,
+    ) -> Queue {
         let shared = Arc::new(Shared::default());
         let (tx, done) = channel();
         let s = Arc::clone(&shared);
         let by = format!("{app}'s lessons");
         let spawned = std::thread::Builder::new()
             .name(format!("{}-voice", app.to_lowercase()))
-            .spawn(move || run(&s, &root, &by, synth, &tx));
+            .spawn(move || run(&s, &root, lasting.as_deref(), &by, synth, &tx));
         if let Err(e) = spawned {
             eprintln!("{}: voice: {e}", app.to_lowercase());
         }
@@ -132,7 +146,14 @@ impl Drop for Queue {
     }
 }
 
-fn run(shared: &Shared, root: &Path, by: &str, mut synth: Box<dyn Synth>, done: &Sender<Done>) {
+fn run(
+    shared: &Shared,
+    root: &Path,
+    lasting: Option<&Path>,
+    by: &str,
+    mut synth: Box<dyn Synth>,
+    done: &Sender<Done>,
+) {
     loop {
         let section = {
             let mut st = shared
@@ -155,7 +176,11 @@ fn run(shared: &Shared, root: &Path, by: &str, mut synth: Box<dyn Synth>, done: 
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
             }
         };
-        let result = speak(root, by, synth.as_mut(), &section);
+        let into = match (&section.speech, lasting) {
+            (Speech::Remote { .. }, Some(l)) => l,
+            _ => root,
+        };
+        let result = speak(into, by, synth.as_mut(), &section);
         let quit = {
             let mut st = shared
                 .state
@@ -175,7 +200,7 @@ fn run(shared: &Shared, root: &Path, by: &str, mut synth: Box<dyn Synth>, done: 
     }
 }
 
-/// One section spoken into the cache.
+/// One section spoken into the cache `root`.
 fn speak(root: &Path, by: &str, synth: &mut dyn Synth, s: &Section) -> Result<PathBuf, String> {
     std::fs::create_dir_all(root).map_err(|e| format!("{}: {e}", root.display()))?;
     let out = root.join(format!(".{}.{}.wav", s.key, std::process::id()));
@@ -184,7 +209,7 @@ fn speak(root: &Path, by: &str, synth: &mut dyn Synth, s: &Section) -> Result<Pa
         let _ = std::fs::remove_file(&out);
         return Err(e);
     }
-    let meta = json!({
+    let mut meta = json!({
         "text": s.text,
         "backend": s.engine.backend(),
         "voice": s.voice,
@@ -192,6 +217,10 @@ fn speak(root: &Path, by: &str, synth: &mut dyn Synth, s: &Section) -> Result<Pa
         "by": by,
         "created": today(),
     });
+    if let Speech::Remote { backend, model, .. } = &s.speech {
+        meta["backend"] = backend.as_str().into();
+        meta["model"] = model.as_str().into();
+    }
     cache::put(root, &s.key, &out, &meta)
 }
 

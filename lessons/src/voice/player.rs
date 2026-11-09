@@ -186,24 +186,45 @@ pub fn read_m4a(bytes: Vec<u8>) -> Result<Pcm, String> {
     })
 }
 
-/// A section's audio: a WAV, or AAC in an MP4 (`.m4a`).
+/// Whether `bytes` are an MP4 (its `ftyp` box first): AAC as a bundle and
+/// a remote voice may give it.
+pub fn is_mp4(bytes: &[u8]) -> bool {
+    bytes.get(4..8) == Some(b"ftyp")
+}
+
+/// Whether the file at `path` is an MP4 ([`is_mp4`]).
+pub fn is_mp4_file(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0; 8];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok_and(|()| is_mp4(&head))
+}
+
+/// Audio as a section's: a WAV, or AAC in an MP4, told by its bytes.
+///
+/// # Errors
+///
+/// It is neither, or does not decode.
+pub fn decode(bytes: Vec<u8>) -> Result<Pcm, String> {
+    if is_mp4(&bytes) {
+        #[cfg(feature = "playback")]
+        return read_m4a(bytes);
+        #[cfg(not(feature = "playback"))]
+        return Err(opencad_ui::i18n::tr(Msg::NoPlayback).to_owned());
+    }
+    read_wav(&bytes)
+}
+
+/// A section's audio: a WAV, or AAC in an MP4 (`audio.m4a`), told by its
+/// bytes, not its name.
 ///
 /// # Errors
 ///
 /// It cannot be read or is neither.
 pub fn read_audio(path: &Path) -> Result<Pcm, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    if path.extension().is_some_and(|e| e == "m4a") {
-        #[cfg(feature = "playback")]
-        return read_m4a(bytes).map_err(|e| format!("{}: {e}", path.display()));
-        #[cfg(not(feature = "playback"))]
-        return Err(format!(
-            "{}: {}",
-            path.display(),
-            opencad_ui::i18n::tr(Msg::NoPlayback)
-        ));
-    }
-    read_wav(&bytes)
+    decode(bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 #[cfg(feature = "playback")]

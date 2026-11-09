@@ -8,9 +8,11 @@
 //! `voices`. Kokoro's are `<work>/audio/<key>.wav`. A downloaded bundle's
 //! sections (`bundle.rs`) are unpacked into the lasting one, keyed alike,
 //! their audio `audio.m4a` (AAC), Kokoro's too.
-//! The app's own cache is laid out as the recordings' (`<key>/audio.wav`
-//! and `meta.json`) and is the only one it writes: the recordings' are
-//! only read, never pruned or changed.
+//! The app's own cache is laid out as the recordings' (`<key>/audio.wav`,
+//! or `audio.m4a` for AAC a synth gave, and `meta.json`) and is the only
+//! one it writes, but for the sections of a remote voice of the app's own,
+//! which go into the lasting one: the recordings' sections are only read,
+//! never pruned or changed.
 
 use std::path::{Path, PathBuf};
 
@@ -82,21 +84,20 @@ pub fn in_folders(key: &str, folders: &[PathBuf]) -> Option<PathBuf> {
 /// caches of what `found` has, then the app's.
 pub fn find(s: &Section, found: &Found, app: Option<&Path>) -> Option<PathBuf> {
     let recorded = match s.engine {
-        Engine::Fish | Engine::ElevenLabs => in_folders(&s.key, &found.recorded),
+        Engine::Fish | Engine::ElevenLabs | Engine::Remote => in_folders(&s.key, &found.recorded),
         Engine::Kokoro => (found.tutorials.as_deref())
             .map(|t| t.join("audio").join(format!("{}.wav", s.key)))
             .filter(|p| p.is_file())
             .or_else(|| in_folders(&s.key, &found.recorded)),
     };
-    recorded.or_else(|| {
-        let mine = app?.join(&s.key).join("audio.wav");
-        mine.is_file().then_some(mine)
-    })
+    recorded.or_else(|| in_folders(&s.key, &[app?.to_path_buf()]))
 }
 
 /// Keeps `wav` as the section `key` in `root`: written into a folder of
-/// its own, then renamed into place whole, as the recordings' cache does.
-/// `root` is the app's own cache, never one of the recordings'.
+/// its own, then renamed into place whole, as the recordings' cache does;
+/// `audio.m4a` where its bytes are AAC in an MP4 ([`super::player::is_mp4`]),
+/// else `audio.wav`. `root` is the app's own cache, or the lasting one for
+/// a remote section, never another of the recordings'.
 ///
 /// # Errors
 ///
@@ -106,9 +107,14 @@ pub fn put(root: &Path, key: &str, wav: &Path, meta: &Value) -> Result<PathBuf, 
     let tmp = root.join(format!(".{key}.{}.tmp", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(fail)?;
+    let name = if super::player::is_mp4_file(wav) {
+        "audio.m4a"
+    } else {
+        "audio.wav"
+    };
     let done = (|| {
-        std::fs::rename(wav, tmp.join("audio.wav")).or_else(|_| {
-            std::fs::copy(wav, tmp.join("audio.wav"))?;
+        std::fs::rename(wav, tmp.join(name)).or_else(|_| {
+            std::fs::copy(wav, tmp.join(name))?;
             std::fs::remove_file(wav)
         })?;
         let text = serde_json::to_string_pretty(meta).unwrap_or_default();
@@ -116,7 +122,7 @@ pub fn put(root: &Path, key: &str, wav: &Path, meta: &Value) -> Result<PathBuf, 
         let to = root.join(key);
         let _ = std::fs::remove_dir_all(&to);
         std::fs::rename(&tmp, &to)?;
-        Ok(to.join("audio.wav"))
+        Ok(to.join(name))
     })()
     .map_err(fail);
     let _ = std::fs::remove_dir_all(&tmp);

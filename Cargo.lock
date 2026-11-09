@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "egui-lessons"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "egui",
  "minreq",
@@ -652,7 +652,7 @@ dependencies = [
 
 [[package]]
 name = "egui-screencast"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "eframe",
  "image",

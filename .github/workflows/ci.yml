@@ -41,3 +41,15 @@ jobs:
       # the recorder's own code must be the one the Rust tests read.
       - name: Key fixture
         run: python3 scripts/lesson_fixture.py --check
+      # The scripts and pronunciation lists need PyYAML (pinned as in
+      # requirements.txt): what a voice is given and the lessons' own
+      # sections, written again by the recorder's code, must be the
+      # fixtures egui-lessons' tests read; and lesson_voices.py's tests.
+      - name: PyYAML
+        run: python3 -m venv target/py && target/py/bin/pip install -q pyyaml==6.0.3
+      - name: Spoken fixtures
+        run: |
+          target/py/bin/python scripts/spoken_fixture.py --tutorials lessons/tests/tutorials --check lessons/tests/fixtures/spoken.json
+          target/py/bin/python scripts/lesson_voices_fixture.py --tutorials lessons/tests/tutorials --check lessons/tests/fixtures/lesson_voices.json
+      - name: lesson_voices.py
+        run: target/py/bin/python -m unittest discover -s scripts -p test_lesson_voices.py

@@ -1,0 +1,60 @@
+# A test course of egui-lessons: the awkward cases of the format in a
+# few steps (languages, tags, units, signs, number words, cues, the
+# lesson's own texts, ElevenLabs' settings).
+title: A tray
+title_de: Eine Schale
+summary: A small tray, 60 × 40 mm.
+summary_de: Eine kleine Schale, 60 × 40 mm.
+summary_lesson_de: Eine kleine Schale; die Skizze ist schon offen.
+voice: bf_emma
+speed: 1.1
+speed_de: 1.2
+voice_settings: {stability: 0.4}
+voice_model: eleven_turbo_v2_5
+voice_language: auto
+
+steps:
+  - name: intro
+    title: What you will make
+    card:
+      title: A tray
+      points: [A sketch on the XY plane, Walls of 2.5 mm]
+      points_de: [Eine Skizze auf der XY-Ebene, Wände von 2,5 mm]
+    say: Welcome. [pause] Let's make a tray on the XY plane.
+    say_de: Willkommen. [pause] Wir machen eine Schale auf der XY-Ebene.
+    actions: [{wait: 1}]
+  - name: sketch
+    title: Sketch
+    text: Click **Sketch** and pick the XY plane, then draw 60 × 40 mm.
+    text_de: Klicke auf **Skizze** und wähle die XY-Ebene, dann zeichne 60 × 40 mm.
+    actions:
+      - click: {button: Sketch}
+      - cue: {en: pick the XY plane, de: wähle die XY-Ebene}
+      - click: {view: XY}
+  - name: screws
+    title: Screws
+    text: Use M3 screws, an M2.5 insert and ISO 4762; 1000001 parts → done.
+    text_de: Nimm M3-Schrauben nach ISO 4762 und DIN 780, z. B. M2,5; 21 Teile › fertig.
+    say: {en: "Use [excited] M3 screws and an M2.5 insert from JLCCNC in aluminium.", de: "Nimm [excited] M3-Schrauben nach ISO 4762, z. B. M2,5 und 3,45 mm; 21 Teile › fertig."}
+    actions:
+      - click: {field: Depth}
+      - type: {en: '10', de: '12'}
+      - key: Escape
+  - name: export
+    title: Export
+    text: Export a 3MF of the CAD file; a C++ tool reads it.
+    text_de: Exportiere ein 3MF; Öl und Größe Ö, ein Wert z2, z oder Z.
+    text_lesson_de: Exportiere ein 3MF, wie im Video.
+    actions: [{click: {button: Export}}]
+  - name: thanks
+    text: Done.
+    text_de: Fertig.
+    say: {en: Thanks for watching, de: Danke fürs Zuschauen}
+    say_lesson:
+      en: Thanks for following along.
+      de: |
+        Die Beispiele findest du auf GitHub.
+        Danke fürs Mitmachen.
+  - name: silent
+    text: ""
+    text_de: ""

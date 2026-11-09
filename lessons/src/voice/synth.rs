@@ -1,7 +1,8 @@
 //! The voice worker: `worker.py` in mlx-speech's Python (S2 Pro) or the
 //! tutorial venv's (Kokoro), started on the first section to speak and
 //! kept for the next (ADR 0056). One process at a time: S2 Pro holds about
-//! 10 GB. Offline, at a low priority, its log beside the cache.
+//! 10 GB. Offline, at a low priority, its log beside the cache. The app's
+//! remote sections go to its own synth instead ([`Dispatch`]).
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -75,8 +76,10 @@ impl Process {
                 self.found.kokoro.as_ref().map(|k| k.python.clone()),
                 "kokoro",
             ),
-            // Only played from the recordings: the app never asks it.
+            // Only played from the recordings: the app never asks it; a
+            // remote voice is the app's.
             Engine::ElevenLabs => (None, "elevenlabs"),
+            Engine::Remote => (None, "remote"),
         };
         let python = python.ok_or_else(|| trf(Msg::NotFound, &[&engine.label()]))?;
         std::fs::create_dir_all(&self.root).map_err(|e| format!("{}: {e}", self.root.display()))?;
@@ -120,7 +123,7 @@ impl Process {
 
 impl Synth for Process {
     fn speak(&mut self, s: &Section, out: &Path) -> Result<(), String> {
-        if s.speech == Speech::Recorded {
+        if matches!(s.speech, Speech::Recorded | Speech::Remote { .. }) {
             return Err(trf(Msg::NotFound, &[&s.engine.label()]));
         }
         let alive = self.child.lock().is_ok_and(|g| g.is_some());
@@ -148,7 +151,9 @@ impl Synth for Process {
                 "voice": voice,
                 "speed": speed,
             }),
-            Speech::Recorded => return Err(trf(Msg::NotFound, &[&s.engine.label()])),
+            Speech::Recorded | Speech::Remote { .. } => {
+                return Err(trf(Msg::NotFound, &[&s.engine.label()]));
+            }
         };
         let r = self.running.as_mut().ok_or("no worker")?;
         let sent = writeln!(r.stdin, "{request}").and_then(|()| r.stdin.flush());
@@ -173,6 +178,58 @@ impl Synth for Process {
         if let Some(mut ch) = self.child.lock().ok().and_then(|mut g| g.take()) {
             let _ = ch.kill();
             let _ = ch.wait();
+        }
+    }
+}
+
+/// The worker of a speaker: the remote sections ([`Speech::Remote`]) by
+/// the app's synth ([`super::Narrate::remote`]), the others by the local
+/// one.
+pub struct Dispatch {
+    pub local: Box<dyn Synth>,
+    pub remote: Option<Box<dyn Synth>>,
+}
+
+impl std::fmt::Debug for Dispatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Dispatch")
+            .field("remote", &self.remote.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Dispatch {
+    /// The worker of `local` and `remote` (each with what stops it), and
+    /// what stops both.
+    pub fn make(
+        local: (Box<dyn Synth>, Kill),
+        remote: Option<(Box<dyn Synth>, Kill)>,
+    ) -> (Box<dyn Synth>, Kill) {
+        let (local, local_kill) = local;
+        let (remote, remote_kill) = remote.unzip();
+        let kill: Kill = Arc::new(move || {
+            if let Some(k) = &remote_kill {
+                k();
+            }
+            local_kill();
+        });
+        (Box::new(Dispatch { local, remote }), kill)
+    }
+}
+
+impl Synth for Dispatch {
+    fn speak(&mut self, s: &Section, out: &Path) -> Result<(), String> {
+        match (&s.speech, &mut self.remote) {
+            (Speech::Remote { .. }, Some(r)) => r.speak(s, out),
+            (Speech::Remote { label, .. }, None) => Err(trf(Msg::NotFound, &[label])),
+            _ => self.local.speak(s, out),
+        }
+    }
+
+    fn close(&mut self) {
+        self.local.close();
+        if let Some(r) = &mut self.remote {
+            r.close();
         }
     }
 }

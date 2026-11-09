@@ -3,6 +3,37 @@
 One version and one tag for both crates of the repository, the recorder
 (`egui-screencast`) and the lessons (`egui-lessons`).
 
+## 0.6.0
+
+- **egui-lessons: the script format** (OpenSolve's ADR 0062, stage 2),
+  moved from OpenSolve: `script` (`Course<E>`, `Step<E>`, `Embedded`,
+  `parse`/`parse_text`, `localized`, `text`, `lesson_text`, `only_in`,
+  `words`, `cues`, `with_work`, the targets and escapes of a step, the
+  inline editor as a target). A step's keys that only the app reads are its
+  `Extra` (`Extra::parse(raw, localized, lang)`, `()` for none), read as
+  the step's own. `lessons/FORMAT.md` says every key.
+- `spoken` (`plain`, `spoken`, `read_out`) and `pronounce` (`List`,
+  `Lists`, `said_with`, `number_words`, `german_number`): what a voice is
+  given, through the app's pronunciation lists (`Lists::new` of its
+  embedded `pronunciation.<lang>.yaml`).
+- `voice::narration`: `Narration`, `narration()`, `eleven_section`,
+  `kokoro_recorded`, `section`, `recorded`, and `Scripts`, the `Narrate` of
+  an app's embedded courses.
+- A voice of the app's own: `Engine::Remote` and `Speech::Remote { backend,
+  model, label }` (never the local worker's); `Narrate::speaks(course,
+  lang)` makes the voice available and on for such a course;
+  `Narrate::remote()` gives the synth of its sections (`synth::Dispatch`
+  sends each section to its synth); they are kept in the lasting cache
+  (`Speaker::lasting`, `Queue::keeping`) with their backend and model; the
+  voice info says "AI voice (<label>)".
+- A synth may give AAC in an MP4: kept as `audio.m4a`, decoded by its
+  bytes, not its name (`player::decode`, `is_mp4`).
+- `scripts/lesson_voices.py` (from OpenSolve; `--tutorials` and
+  `--voice-cache` required) and its tests; `scripts/spoken_fixture.py` and
+  `scripts/lesson_voices_fixture.py` write the fixtures of what a voice is
+  given and of the lessons' own sections, for egui-lessons' test tutorials
+  (`lessons/tests/tutorials`) and for an app's; CI checks them.
+
 ## 0.5.0
 
 - **egui-lessons**, a second crate in `lessons/` (the repository a

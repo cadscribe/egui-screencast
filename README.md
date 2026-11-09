@@ -102,28 +102,44 @@ too.
 
 The repository has a second crate, `egui-lessons` (`lessons/`), released
 with the recorder under one version and one tag: the same scripts as
-courses inside the app. This release holds their voice: a lesson's step
-read aloud by the voice its recordings spoke (ElevenLabs, or in English
-Kokoro, from the recordings' caches), downloaded once per course and
-language as a bundle where it is not on the machine, else spoken ahead by
-a local voice (S2 Pro by mlx-speech, Kokoro in the tutorial venv); one
-speaker per lesson, a step not recorded silent. The app gives its name and
-places once (`egui_lessons::Config`) and says what each step says
-(`voice::Narrate`); the voice's row in the lesson pane, its progress bar
-and the speaker's level are `voice::ui` (feature `ui`, with opencad-ui).
-Its keys are the recorder's to the letter: `lessons/tests/fixtures/keys.json`
-is written by `scripts/lesson_fixture.py` with the recorder's own code
-(`--check` in CI).
+courses inside the app.
+
+- **The script format** (`script`): a course and its steps in the app's
+  language, their actions, the cues checked against what each step says,
+  the lesson's own texts (`text_lesson`, `say_lesson`). A step's keys that
+  only the app reads (OpenSolve's `check:`, `intent:`) are its `Extra`,
+  parsed with the course: `Course<E: Extra>`. `lessons/FORMAT.md` says
+  every key and who reads it.
+- **What the voice is given** (`spoken`, `pronounce`): the text as the
+  recorder speaks it, through the app's pronunciation lists.
+- **The voice** (`voice`): a lesson's step read aloud by the voice its
+  recordings spoke (ElevenLabs, or in English Kokoro, from the
+  recordings' caches), downloaded once per course and language as a
+  bundle where it is not on the machine, else spoken ahead by a local
+  voice (S2 Pro by mlx-speech, Kokoro in the tutorial venv); one speaker
+  per lesson, a step not recorded silent. What each step says is
+  `voice::narration` (`Scripts` for the app's embedded courses); an app
+  with lessons of its own read by a voice it reaches itself (a server's
+  model) says so through `voice::Narrate` (`speaks`, `remote`, sections of
+  `Speech::Remote`, kept in the lasting cache). The voice's row in the
+  lesson pane, its progress bar and the speaker's level are `voice::ui`
+  (feature `ui`, with opencad-ui).
+
+The app gives its name and places once (`egui_lessons::Config`). The keys
+are the recorder's to the letter: the fixtures in `lessons/tests/fixtures`
+are written by `scripts/lesson_fixture.py`, `spoken_fixture.py` and
+`lesson_voices_fixture.py` with the recorder's own code (`--check` in CI).
+`scripts/lesson_voices.py` lists, and with `--speak` makes, the sections a
+lesson reads that no recording made (`say_lesson`, a step changed since).
 
 ```toml
-egui-screencast = { git = "https://github.com/cadscribe/egui-screencast", tag = "v0.5.0" }
-egui-lessons    = { git = "https://github.com/cadscribe/egui-screencast", tag = "v0.5.0" }
+egui-screencast = { git = "https://github.com/cadscribe/egui-screencast", tag = "v0.6.0" }
+egui-lessons    = { git = "https://github.com/cadscribe/egui-screencast", tag = "v0.6.0" }
 ```
 
-Features: `playback` (rodio, and symphonia for a bundle's AAC; a Linux
-build needs `libasound2-dev`) and `ui`, both on by default. The script
-format, the hints and the lesson pane follow in later releases (OpenSolve's
-ADR 0062).
+Features: `playback` (rodio, and symphonia for AAC; a Linux build needs
+`libasound2-dev`) and `ui`, both on by default. The hints and the lesson
+pane follow in later releases (OpenSolve's ADR 0062).
 
 ## Voices: Fish Audio S2 Pro, Kokoro or ElevenLabs
 

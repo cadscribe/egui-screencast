@@ -1,0 +1,212 @@
+{
+ "cases": [
+  {
+   "name": "German recordings",
+   "lang": "de",
+   "voice": "HzBCRGsOskP44taMg2CT",
+   "model": "eleven_v3",
+   "language": "de",
+   "script": "\ntitle: T\nspeed: 1.0\nspeed_de: 1.1\nvoice_settings: {stability: 0.4}\nvoice_model: eleven_turbo_v2_5\nvoice_language: de\nsteps:\n  - name: thanks\n    text: Done.\n    say: {en: Thanks for watching, de: Danke fürs Zuschauen}\n    say_lesson:\n      en: Thanks for following along.\n      de: |\n        OpenSolve, die Beispiele und weitere Tutorials findest du auf GitHub.\n        Danke fürs Mitmachen.\n  - name: suffixed\n    text: x\n    say: Watch.\n    say_de: Schau.\n    say_lesson: Follow along.\n    say_lesson_de: Mach mit, die Platte ist schon geöffnet.\n  - name: lesson in English only\n    text: x\n    say: Watch the plate.\n    say_de: Schau dir die Platte an.\n    say_lesson: {en: Only in the lesson.}\n  - name: say in English only\n    text: {en: x, de: y}\n    say: Watch.\n  - name: text only\n    text: {en: \"A 10 mm plate, an M3 screw, ISO 4762 and 3.4 mm.\", de: \"Eine Platte von 10 mm, eine M3-Schraube nach ISO 4762, z. B. 3,4 mm und 90°.\"}\n  - name: empty say\n    say: \"\"\n    text: Only text.\n    text_de: Nur **Text**, mit einem [Link](https://example.org).\n  - name: nothing\n    text: \"\"\n  - name: tagged\n    text: x\n    say: {en: \"Now [pause] the next part.\", de: \"Jetzt [pause] der nächste Teil › weiter.\"}\n",
+   "sections": [
+    {
+     "step": 1,
+     "lesson": true,
+     "said": "OpenSolve, die Beispiele und weitere Tutorials findest du auf GitHub. Danke fürs Mitmachen.",
+     "key": "d970200da29d820be24c0c03"
+    },
+    {
+     "step": 2,
+     "lesson": true,
+     "said": "Mach mit, die Platte ist schon geöffnet.",
+     "key": "90fbeea65b512e063ac2e1ff"
+    },
+    {
+     "step": 3,
+     "lesson": false,
+     "said": "Schau dir die Platte an.",
+     "key": "af9195838a8c7d475b63a900"
+    },
+    {
+     "step": 4,
+     "lesson": false,
+     "said": "Watch.",
+     "key": "902fcd49ac0b772dd2c50af7"
+    },
+    {
+     "step": 5,
+     "lesson": false,
+     "said": "Eine Platte von 10 Millimeter, eine Em 3 Schraube nach Iso viertausendsiebenhundertzweiundsechzig, zum Beispiel 3,4 Millimeter und 90 Grad.",
+     "key": "bfbf4eae245d8e6b6413d146"
+    },
+    {
+     "step": 6,
+     "lesson": false,
+     "said": "Nur Text, mit einem Link.",
+     "key": "9c2a184b5a88897a34f0f5e8"
+    },
+    {
+     "step": 8,
+     "lesson": false,
+     "said": "Jetzt [pause] der nächste Teil , weiter.",
+     "key": "b462d98179b519eb0ed7b0bf"
+    }
+   ]
+  },
+  {
+   "name": "the script's model and language",
+   "lang": "de",
+   "voice": "HzBCRGsOskP44taMg2CT",
+   "model": null,
+   "language": null,
+   "script": "\ntitle: T\nspeed: 1.0\nspeed_de: 1.1\nvoice_settings: {stability: 0.4}\nvoice_model: eleven_turbo_v2_5\nvoice_language: de\nsteps:\n  - name: thanks\n    text: Done.\n    say: {en: Thanks for watching, de: Danke fürs Zuschauen}\n    say_lesson:\n      en: Thanks for following along.\n      de: |\n        OpenSolve, die Beispiele und weitere Tutorials findest du auf GitHub.\n        Danke fürs Mitmachen.\n  - name: suffixed\n    text: x\n    say: Watch.\n    say_de: Schau.\n    say_lesson: Follow along.\n    say_lesson_de: Mach mit, die Platte ist schon geöffnet.\n  - name: lesson in English only\n    text: x\n    say: Watch the plate.\n    say_de: Schau dir die Platte an.\n    say_lesson: {en: Only in the lesson.}\n  - name: say in English only\n    text: {en: x, de: y}\n    say: Watch.\n  - name: text only\n    text: {en: \"A 10 mm plate, an M3 screw, ISO 4762 and 3.4 mm.\", de: \"Eine Platte von 10 mm, eine M3-Schraube nach ISO 4762, z. B. 3,4 mm und 90°.\"}\n  - name: empty say\n    say: \"\"\n    text: Only text.\n    text_de: Nur **Text**, mit einem [Link](https://example.org).\n  - name: nothing\n    text: \"\"\n  - name: tagged\n    text: x\n    say: {en: \"Now [pause] the next part.\", de: \"Jetzt [pause] der nächste Teil › weiter.\"}\n",
+   "sections": [
+    {
+     "step": 1,
+     "lesson": true,
+     "said": "OpenSolve, die Beispiele und weitere Tutorials findest du auf GitHub. Danke fürs Mitmachen.",
+     "key": "758e6d6befee2a5d2a4cfb82"
+    },
+    {
+     "step": 2,
+     "lesson": true,
+     "said": "Mach mit, die Platte ist schon geöffnet.",
+     "key": "69e3a3ca8027856e8e50680a"
+    },
+    {
+     "step": 3,
+     "lesson": false,
+     "said": "Schau dir die Platte an.",
+     "key": "309b2d13d0e00f06dd99f7ff"
+    },
+    {
+     "step": 4,
+     "lesson": false,
+     "said": "Watch.",
+     "key": "a18fe3eebf7bfcbeb3bde7ca"
+    },
+    {
+     "step": 5,
+     "lesson": false,
+     "said": "Eine Platte von 10 Millimeter, eine Em 3 Schraube nach Iso viertausendsiebenhundertzweiundsechzig, zum Beispiel 3,4 Millimeter und 90 Grad.",
+     "key": "2e63b48103c1b3fc18502c81"
+    },
+    {
+     "step": 6,
+     "lesson": false,
+     "said": "Nur Text, mit einem Link.",
+     "key": "87e22ebdb067308c82ff3f97"
+    },
+    {
+     "step": 8,
+     "lesson": false,
+     "said": "Jetzt [pause] der nächste Teil , weiter.",
+     "key": "1ce5824197f595af4bfe36ba"
+    }
+   ]
+  },
+  {
+   "name": "English, the language told by auto",
+   "lang": "en",
+   "voice": "voice-en",
+   "model": null,
+   "language": "auto",
+   "script": "\ntitle: T\nspeed: 1.0\nspeed_de: 1.1\nvoice_settings: {stability: 0.4}\nvoice_model: eleven_turbo_v2_5\nvoice_language: de\nsteps:\n  - name: thanks\n    text: Done.\n    say: {en: Thanks for watching, de: Danke fürs Zuschauen}\n    say_lesson:\n      en: Thanks for following along.\n      de: |\n        OpenSolve, die Beispiele und weitere Tutorials findest du auf GitHub.\n        Danke fürs Mitmachen.\n  - name: suffixed\n    text: x\n    say: Watch.\n    say_de: Schau.\n    say_lesson: Follow along.\n    say_lesson_de: Mach mit, die Platte ist schon geöffnet.\n  - name: lesson in English only\n    text: x\n    say: Watch the plate.\n    say_de: Schau dir die Platte an.\n    say_lesson: {en: Only in the lesson.}\n  - name: say in English only\n    text: {en: x, de: y}\n    say: Watch.\n  - name: text only\n    text: {en: \"A 10 mm plate, an M3 screw, ISO 4762 and 3.4 mm.\", de: \"Eine Platte von 10 mm, eine M3-Schraube nach ISO 4762, z. B. 3,4 mm und 90°.\"}\n  - name: empty say\n    say: \"\"\n    text: Only text.\n    text_de: Nur **Text**, mit einem [Link](https://example.org).\n  - name: nothing\n    text: \"\"\n  - name: tagged\n    text: x\n    say: {en: \"Now [pause] the next part.\", de: \"Jetzt [pause] der nächste Teil › weiter.\"}\n",
+   "sections": [
+    {
+     "step": 1,
+     "lesson": true,
+     "said": "Thanks for following along.",
+     "key": "bc92453221c9cd3ea964de46"
+    },
+    {
+     "step": 2,
+     "lesson": true,
+     "said": "Follow along.",
+     "key": "4b49495d4d61231a4f5bcdaf"
+    },
+    {
+     "step": 3,
+     "lesson": true,
+     "said": "Only in the lesson.",
+     "key": "9a9bd1d1a7526534d68dce60"
+    },
+    {
+     "step": 4,
+     "lesson": false,
+     "said": "Watch.",
+     "key": "4340f31c3df92cbd0b22d128"
+    },
+    {
+     "step": 5,
+     "lesson": false,
+     "said": "A 10 millimeters plate, an M 3 screw, ISO 4762 and 3.4 millimeters.",
+     "key": "5732163f8bc04c599cbab20f"
+    },
+    {
+     "step": 6,
+     "lesson": false,
+     "said": "Only text.",
+     "key": "96560f8097ceb945f0066f88"
+    },
+    {
+     "step": 8,
+     "lesson": false,
+     "said": "Now [pause] the next part.",
+     "key": "8de76a8832c18858fa2dc40d"
+    }
+   ]
+  },
+  {
+   "name": "English, not told",
+   "lang": "en",
+   "voice": "voice-en",
+   "model": "eleven_multilingual_v2",
+   "language": "off",
+   "script": "\ntitle: T\nspeed: 1.0\nspeed_de: 1.1\nvoice_settings: {stability: 0.4}\nvoice_model: eleven_turbo_v2_5\nvoice_language: de\nsteps:\n  - name: thanks\n    text: Done.\n    say: {en: Thanks for watching, de: Danke fürs Zuschauen}\n    say_lesson:\n      en: Thanks for following along.\n      de: |\n        OpenSolve, die Beispiele und weitere Tutorials findest du auf GitHub.\n        Danke fürs Mitmachen.\n  - name: suffixed\n    text: x\n    say: Watch.\n    say_de: Schau.\n    say_lesson: Follow along.\n    say_lesson_de: Mach mit, die Platte ist schon geöffnet.\n  - name: lesson in English only\n    text: x\n    say: Watch the plate.\n    say_de: Schau dir die Platte an.\n    say_lesson: {en: Only in the lesson.}\n  - name: say in English only\n    text: {en: x, de: y}\n    say: Watch.\n  - name: text only\n    text: {en: \"A 10 mm plate, an M3 screw, ISO 4762 and 3.4 mm.\", de: \"Eine Platte von 10 mm, eine M3-Schraube nach ISO 4762, z. B. 3,4 mm und 90°.\"}\n  - name: empty say\n    say: \"\"\n    text: Only text.\n    text_de: Nur **Text**, mit einem [Link](https://example.org).\n  - name: nothing\n    text: \"\"\n  - name: tagged\n    text: x\n    say: {en: \"Now [pause] the next part.\", de: \"Jetzt [pause] der nächste Teil › weiter.\"}\n",
+   "sections": [
+    {
+     "step": 1,
+     "lesson": true,
+     "said": "Thanks for following along.",
+     "key": "1f576b557508a90f9664c411"
+    },
+    {
+     "step": 2,
+     "lesson": true,
+     "said": "Follow along.",
+     "key": "78804f94ad8c36747cf16dd1"
+    },
+    {
+     "step": 3,
+     "lesson": true,
+     "said": "Only in the lesson.",
+     "key": "2e6a9096dd11c1f69d58efed"
+    },
+    {
+     "step": 4,
+     "lesson": false,
+     "said": "Watch.",
+     "key": "2583fd04e62fc65ffe5479b7"
+    },
+    {
+     "step": 5,
+     "lesson": false,
+     "said": "A 10 millimeters plate, an M 3 screw, ISO 4762 and 3.4 millimeters.",
+     "key": "e43604a04de45f59839e6a21"
+    },
+    {
+     "step": 6,
+     "lesson": false,
+     "said": "Only text.",
+     "key": "8804af589bd0a1853c5044f8"
+    },
+    {
+     "step": 8,
+     "lesson": false,
+     "said": "Now [pause] the next part.",
+     "key": "cb9b524fb43da22907a12db6"
+    }
+   ]
+  }
+ ]
+}

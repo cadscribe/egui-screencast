@@ -17,6 +17,7 @@ pub mod cache;
 pub mod discover;
 pub mod key;
 pub mod meter;
+pub mod narration;
 pub mod player;
 pub mod queue;
 pub mod synth;
@@ -60,6 +61,10 @@ pub enum Engine {
     /// ElevenLabs, only as the recordings had it speak: played from their
     /// cache, never asked for.
     ElevenLabs,
+    /// A voice the app reaches itself (a server's model): its sections are
+    /// [`Speech::Remote`], spoken by the app's [`Narrate::remote`] synth,
+    /// never by the local worker.
+    Remote,
 }
 
 impl Engine {
@@ -68,15 +73,18 @@ impl Engine {
             Engine::Fish => "Fish Audio S2 Pro",
             Engine::Kokoro => "Kokoro",
             Engine::ElevenLabs => "ElevenLabs",
+            Engine::Remote => "remote",
         }
     }
 
-    /// As the recordings' `meta.json` names it.
+    /// As the recordings' `meta.json` names it (a remote section's own
+    /// backend is its [`Speech::Remote`]'s).
     pub fn backend(self) -> &'static str {
         match self {
             Engine::Fish => "fish-s2-pro",
             Engine::Kokoro => "kokoro",
             Engine::ElevenLabs => "elevenlabs",
+            Engine::Remote => "remote",
         }
     }
 }
@@ -84,6 +92,15 @@ impl Engine {
 /// What the worker needs besides the text.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Speech {
+    /// Spoken by the app's remote synth ([`Narrate::remote`]): `backend` and
+    /// `model` as the cache's `meta.json` names them (`ai-connector`,
+    /// `chatterbox-v3`), `label` as the voice's info says it ("Chatterbox,
+    /// de-male").
+    Remote {
+        backend: String,
+        model: String,
+        label: String,
+    },
     Fish {
         reference: PathBuf,
         transcript: String,
@@ -277,8 +294,9 @@ impl<'a> ElevenRun<'a> {
 }
 
 /// What each step of a course says, keyed as the recorder keyed it: the
-/// app's, which reads its scripts and pronunciation lists (ADR 0062,
-/// stage 1; the script format moves into this crate later).
+/// app's. [`narration::Scripts`] is that of the app's embedded courses; an
+/// app with lessons of its own (an assistant's, read by a voice it reaches
+/// itself) wraps it.
 pub trait Narrate: Send {
     /// Each step of `course` in `lang` as the recordings' voice said it:
     /// ElevenLabs `eleven` (its voice id, and the model and language the
@@ -304,6 +322,21 @@ pub trait Narrate: Send {
         found: &Found,
         prefer: Prefer,
     ) -> Option<Section>;
+
+    /// Whether a voice of the app's own speaks `course` in `lang`, whatever
+    /// is on the machine or in the bundles (the remote voice of its own
+    /// lessons): the voice is then available and on.
+    fn speaks(&mut self, course: &str, lang: Lang) -> bool {
+        let _ = (course, lang);
+        false
+    }
+
+    /// The synth of the app's [`Speech::Remote`] sections, and what stops
+    /// it while it speaks; asked each time the worker starts. `None`: such
+    /// a section fails ("not on this computer").
+    fn remote(&mut self) -> Option<(Box<dyn Synth>, Kill)> {
+        None
+    }
 }
 
 /// A course says nothing: what a [`Speaker`] without the app's narration
@@ -369,6 +402,12 @@ pub struct Speaker {
     pub places: Option<Places>,
     /// The app's cache of sections.
     pub cache: Option<PathBuf>,
+    /// The lasting cache, where the remote sections are kept (beside the
+    /// recordings', which are never written); `None`: the app's cache
+    /// (an app's tests, unless they say where).
+    pub lasting: Option<PathBuf>,
+    /// Makes the local worker; the remote sections go to
+    /// [`Narrate::remote`]'s synth.
     pub make_synth: MakeSynth,
     pub make_player: MakePlayer,
     queue: Option<Queue>,
@@ -415,6 +454,11 @@ impl Speaker {
             found: None,
             places: None,
             cache: cache::app_dir(app),
+            lasting: if config.voice.here() {
+                cache::lasting_dir(app)
+            } else {
+                None
+            },
             make_synth: Arc::new(move |found, root| {
                 synth::Process::make(app, found.clone(), root.to_path_buf())
             }),
@@ -494,10 +538,16 @@ impl Speaker {
         }
     }
 
-    /// Whether a voice speaks `lang`: a local one, or the recordings'
-    /// (ElevenLabs, in English else Kokoro) where a recordings' cache is on
-    /// the machine or a bundle of the language can be downloaded.
+    /// Whether a voice speaks `lang`: the app's own for the course open
+    /// ([`Narrate::speaks`]), a local one, or the recordings' (ElevenLabs,
+    /// in English else Kokoro) where a recordings' cache is on the machine
+    /// or a bundle of the language can be downloaded.
     pub fn available(&mut self, lang: Lang) -> bool {
+        if let Some(at) = &self.at
+            && self.narrate.speaks(&at.course, lang)
+        {
+            return true;
+        }
         let eleven = self.settings.eleven(lang).is_some();
         let found = self.found();
         let recorded = found.recorded.iter().any(|d| d.is_dir());
@@ -670,7 +720,11 @@ impl Speaker {
     /// Where a section was spoken before.
     fn cached(&mut self, s: &Section) -> Option<PathBuf> {
         let cache = self.cache.clone();
-        cache::find(s, self.found(), cache.as_deref())
+        let lasting = self.lasting.clone();
+        cache::find(s, self.found(), cache.as_deref()).or_else(|| {
+            let remote = matches!(s.speech, Speech::Remote { .. });
+            cache::in_folders(&s.key, &[lasting.filter(|_| remote)?])
+        })
     }
 
     /// The step's section and the next ones: played if `play` and ready,
@@ -719,8 +773,10 @@ impl Speaker {
         }
         if self.queue.is_none() {
             let found = self.found().clone();
-            let (synth, kill) = (self.make_synth)(&found, &root);
-            self.queue = Some(Queue::new(self.config.app, root, synth, kill));
+            let local = (self.make_synth)(&found, &root);
+            let (synth, kill) = synth::Dispatch::make(local, self.narrate.remote());
+            let lasting = self.lasting.clone();
+            self.queue = Some(Queue::keeping(self.config.app, root, lasting, synth, kill));
         }
         if let Some(q) = &self.queue {
             q.want(missing);
@@ -868,6 +924,13 @@ impl Speaker {
         if let Some(e) = self.play_error() {
             return trf(Msg::Failed, &[&e]);
         }
+        if let Some(Section {
+            speech: Speech::Remote { label, .. },
+            ..
+        }) = &self.current
+        {
+            return trf(Msg::AiRemote, &[label]);
+        }
         let recorded = self
             .current
             .as_ref()
@@ -887,6 +950,7 @@ opencad_ui::messages! {
         Failed: "Reading aloud does not work: {0}", "Vorlesen geht gerade nicht: {0}";
         AiFish: "AI voice (Fish Audio S2 Pro, non-commercial)", "KI-Stimme (Fish Audio S2 Pro, nicht kommerziell)";
         AiKokoro: "AI voice (Kokoro)", "KI-Stimme (Kokoro)";
+        AiRemote: "AI voice ({0})", "KI-Stimme ({0})";
         AiKokoroRecorded: "AI voice (Kokoro, from the recording)", "KI-Stimme (Kokoro, aus der Aufnahme)";
         Loading: "Downloading the voice for this lesson … {0} %", "Die Stimme für diese Lektion wird geladen … {0} %";
         NotLoaded: "The voice for this lesson could not be downloaded ({0}). It will try again the next time you open the lesson.", "Die Stimme für diese Lektion konnte nicht geladen werden ({0}). Beim nächsten Öffnen der Lektion wird es nochmal versucht.";

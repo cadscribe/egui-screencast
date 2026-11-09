@@ -1359,6 +1359,157 @@ fn the_row_shows_the_voice() {
     assert_eq!(back.on, Some(false));
 }
 
+/// The app's own lesson "mine", read by a voice it reaches itself: every
+/// step a remote section, whatever is on the machine.
+struct Mine {
+    remote: Fake,
+    /// The remote voice gives AAC in an MP4, not a WAV.
+    aac: bool,
+}
+
+impl Narrate for Mine {
+    fn recorded(
+        &mut self,
+        course: &str,
+        _: Lang,
+        _: Option<(&str, ElevenRun<'_>)>,
+    ) -> Option<Vec<Option<Section>>> {
+        (course == "mine").then(|| vec![None; STEPS.len()])
+    }
+
+    fn local(
+        &mut self,
+        course: &str,
+        lang: Lang,
+        step: usize,
+        _: &Found,
+        _: Prefer,
+    ) -> Option<Section> {
+        let text = STEPS
+            .get(step)
+            .filter(|t| course == "mine" && !t.is_empty())?;
+        Some(Section {
+            engine: Engine::Remote,
+            key: format!("remote-{}", key::sha256(text.as_bytes())[..12].to_owned()),
+            text: key::untagged(text),
+            lang,
+            voice: "de-male".into(),
+            speech: Speech::Remote {
+                backend: "toy-server".into(),
+                model: "chatterbox".into(),
+                label: "Chatterbox, de-male".into(),
+            },
+        })
+    }
+
+    fn speaks(&mut self, course: &str, _: Lang) -> bool {
+        course == "mine"
+    }
+
+    fn remote(&mut self) -> Option<(Box<dyn Synth>, Kill)> {
+        let (synth, kill) = self.remote.make();
+        if !self.aac {
+            return Some((synth, kill));
+        }
+        // As the fake, but AAC in its file.
+        struct Aac(Box<dyn Synth>);
+        impl Synth for Aac {
+            fn speak(&mut self, s: &Section, out: &Path) -> Result<(), String> {
+                self.0.speak(s, out)?;
+                std::fs::write(out, TONE).map_err(|e| e.to_string())
+            }
+            fn close(&mut self) {}
+        }
+        Some((Box::new(Aac(synth)), kill))
+    }
+}
+
+/// A lesson of the app's own voice: available and on with no voice on the
+/// machine, each step spoken by the app's synth (never the local worker),
+/// kept in the lasting cache with its backend and model, the info naming
+/// the voice; AAC from the synth is kept as `audio.m4a` and decodes.
+#[test]
+fn a_remote_voice_reads_the_apps_own_lessons() {
+    opencad_ui::i18n::set_thread_lang(Lang::De);
+    for aac in [false, true] {
+        let dir = scratch(&format!("remote-{aac}"));
+        let (local, remote, ears) = (Fake::default(), Fake::default(), Ears::default());
+        let mut v = Speaker::new(
+            &CONFIG,
+            Box::new(Mine {
+                remote: remote.clone(),
+                aac,
+            }),
+        );
+        v.places = Some(fake_machine(&dir, false, false));
+        v.cache = Some(dir.join("cache"));
+        v.lasting = Some(dir.join("lasting"));
+        let f = local.clone();
+        v.make_synth = Arc::new(move |_: &Found, _: &Path| f.make());
+        let e = ears.clone();
+        v.make_player = Arc::new(move || Box::new(e.clone()));
+        v.load(&dir.join("config"));
+        assert!(!v.available(Lang::De), "no course open, no voice here");
+        let now = Some(At {
+            course: "mine".into(),
+            step: 0,
+            lang: Lang::De,
+        });
+        until(&mut v, &now, "the step played", |_| ears.plays().len() == 1);
+        assert!(v.available(Lang::De) && v.on(Lang::De));
+        let s = v.current.clone().expect("a section");
+        assert!(local.spoken().is_empty(), "{:?}", local.spoken());
+        assert_eq!(remote.spoken().first(), Some(&s.key));
+        assert_eq!(v.info(), "KI-Stimme (Chatterbox, de-male)");
+        let name = if aac { "audio.m4a" } else { "audio.wav" };
+        let kept = dir.join("lasting").join(&s.key);
+        assert_eq!(ears.plays()[0], kept.join(name).display().to_string());
+        assert!(!dir.join("cache").join(&s.key).exists(), "not twice");
+        let meta: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(kept.join("meta.json")).expect("meta"))
+                .expect("JSON");
+        assert_eq!(meta["backend"], "toy-server");
+        assert_eq!(meta["model"], "chatterbox");
+        assert_eq!(meta["voice"], "de-male");
+        #[cfg(feature = "playback")]
+        assert!(player::read_audio(&kept.join(name)).is_ok());
+
+        // Played again from the lasting cache: nothing asked twice.
+        v.replay();
+        until(&mut v, &now, "played again", |_| ears.plays().len() == 2);
+        until(&mut v, &now, "spoken ahead", |_| remote.spoken().len() == 2);
+        assert_eq!(remote.spoken()[0], s.key);
+    }
+}
+
+/// A remote section without the app's synth says so; a local section is
+/// never the remote synth's.
+#[test]
+fn the_worker_sends_each_section_to_its_synth() {
+    let (local, remote) = (Fake::default(), Fake::default());
+    let dir = scratch("dispatch");
+    let mut mine = Mine {
+        remote: remote.clone(),
+        aac: false,
+    };
+    let section = mine
+        .local("mine", Lang::En, 0, &Found::default(), Prefer::Fish)
+        .expect("a section");
+    let (mut both, _) = super::synth::Dispatch::make(local.make(), mine.remote());
+    both.speak(&section, &dir.join("a.wav")).expect("spoken");
+    both.speak(&a_section("here"), &dir.join("b.wav"))
+        .expect("spoken");
+    assert_eq!(remote.spoken(), std::slice::from_ref(&section.key));
+    assert_eq!(local.spoken(), ["here"]);
+    let (mut alone, _) = super::synth::Dispatch::make(local.make(), None);
+    let e = alone
+        .speak(&section, &dir.join("c.wav"))
+        .expect_err("no remote synth");
+    assert!(e.contains("Chatterbox, de-male"), "{e}");
+    let (mut process, _) = super::synth::Process::make("Toy", Found::default(), dir.join("worker"));
+    assert!(process.speak(&section, &dir.join("d.wav")).is_err());
+}
+
 /// A WAV played on this machine's speakers: run with `EGUI_LESSONS_WAV`
 /// (`cargo test -p egui-lessons speakers_play -- --ignored`).
 #[cfg(feature = "playback")]

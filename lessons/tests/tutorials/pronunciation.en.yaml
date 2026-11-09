@@ -1,0 +1,16 @@
+# The English list of the test tutorials: every kind of entry, every
+# engine's section.
+all:
+  - {from: "3MF", to: "three M F"}
+  - {from: "XY plane", to: "X Y plane"}
+  - {from: "CAD", to: "C A D"}
+  - {regex: 'A D file', to: 'A D data'}
+  - {regex: '\bM(?P<size>\d+)\.(\d+)\b', to: 'M \g<size> point \2'}
+  - {regex: '\bM(\d+)-', to: 'M \1 '}
+  - {from: "C++", to: "C plus plus"}
+  - {from: "aluminium", to: "aluminum"}
+fish:
+  - {from: "screws", to: "skrews"}
+kokoro:
+  - {from: "plane", to: "plain"}
+elevenlabs: []
