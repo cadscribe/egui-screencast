@@ -145,6 +145,10 @@ class VoiceIntro(unittest.TestCase):
         self.assertEqual(actions[1]["cue"], round(shift + 2.5, 3))
         planned = tutorial.plan("t", self.script, audio, False, True)
         self.assertEqual(planned["steps"][0]["actions"][0]["cue"], shift)
+        # The plan says its language, for the app to play it in.
+        self.assertEqual(planned["lang"], "en")
+        with mock.patch.object(tutorial, "LANG", "de"):
+            self.assertEqual(tutorial.plan("t", self.script, audio, False, True)["lang"], "de")
 
     def test_its_wording_and_off_only_when_said(self):
         self.assertEqual(tutorial.voice_intro({"app": "Foo"}).split()[-1], "Foo.")
@@ -208,6 +212,12 @@ class Languages(unittest.TestCase):
             self.assertEqual(tutorial.voice_notice({}), "Stimme: KI-generiert (Kokoro)")
             self.assertEqual(tutorial.images_dir({}), "images")
             self.assertEqual(tutorial.images_dir({"ui_languages": ["en", "de"]}), "images.de")
+            # The run's --ui-languages, unless the script says its own.
+            with mock.patch.object(tutorial, "UI_LANGUAGES", ["en", "de"]):
+                self.assertEqual(tutorial.images_dir({}), "images.de")
+                self.assertEqual(tutorial.images_dir({"ui_languages": ["en"]}), "images")
+        with mock.patch.object(tutorial, "UI_LANGUAGES", ["en", "de"]):
+            self.assertEqual(tutorial.images_dir({}), "images", "English: images/")
         self.assertEqual(tutorial.suffix(), "")
         self.assertEqual(tutorial.voice_notice({}), "Voice: AI-generated (Kokoro)")
 

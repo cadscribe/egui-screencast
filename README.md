@@ -87,12 +87,43 @@ script gives a text in each: `say: {en: "…", de: "…"}`, or `say_de:`
 beside `say:` (any key: `title_de`, `text_de`, a card's `title_de`, …); a
 plain text is English, and a step with narration but none in the run's
 language stops the build. German files are `<name>.de.mp4` and
-`README.de.md`, the work in `<work>/<name>.de/`; the pictures stay in
-`images/` unless the script says the app speaks the language too
-(`ui_languages: [en, de]`, then `images.de/`; `{lang}` in an `--app-arg`
-or `--env` tells the app). Units are spelled for the voice in each
-language ("8 Millimeter"), and the runner's own words (the notices, the
-page's lines) are German too.
+`README.de.md`, the work in `<work>/<name>.de/`. The plan says the run's
+language (`"lang": "de"`), so the app can open its window in it; `{lang}`
+in an `--app-arg` or `--env` tells it too. The pictures stay in `images/`
+unless the app speaks the language: `--ui-languages en,de` for every
+script of a run (a project sets it once), or a script's own
+`ui_languages: [en, de]`, which wins; then a German run's pictures go to
+`images.de/` and `README.de.md` links them, and the English ones are left
+alone. Units are spelled for the voice in each language ("8 Millimeter"),
+and the runner's own words (the notices, the page's lines) are German
+too.
+
+## Lessons in the app: egui-lessons
+
+The repository has a second crate, `egui-lessons` (`lessons/`), released
+with the recorder under one version and one tag: the same scripts as
+courses inside the app. This release holds their voice: a lesson's step
+read aloud by the voice its recordings spoke (ElevenLabs, or in English
+Kokoro, from the recordings' caches), downloaded once per course and
+language as a bundle where it is not on the machine, else spoken ahead by
+a local voice (S2 Pro by mlx-speech, Kokoro in the tutorial venv); one
+speaker per lesson, a step not recorded silent. The app gives its name and
+places once (`egui_lessons::Config`) and says what each step says
+(`voice::Narrate`); the voice's row in the lesson pane, its progress bar
+and the speaker's level are `voice::ui` (feature `ui`, with opencad-ui).
+Its keys are the recorder's to the letter: `lessons/tests/fixtures/keys.json`
+is written by `scripts/lesson_fixture.py` with the recorder's own code
+(`--check` in CI).
+
+```toml
+egui-screencast = { git = "https://github.com/cadscribe/egui-screencast", tag = "v0.5.0" }
+egui-lessons    = { git = "https://github.com/cadscribe/egui-screencast", tag = "v0.5.0" }
+```
+
+Features: `playback` (rodio, and symphonia for a bundle's AAC; a Linux
+build needs `libasound2-dev`) and `ui`, both on by default. The script
+format, the hints and the lesson pane follow in later releases (OpenSolve's
+ADR 0062).
 
 ## Voices: Fish Audio S2 Pro, Kokoro or ElevenLabs
 

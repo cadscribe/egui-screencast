@@ -1,0 +1,51 @@
+[package]
+name = "egui-lessons"
+description = "Courses in an egui app: a lesson's steps read aloud by the voice its recordings spoke, downloaded once per course and language, played with a progress bar and a speaker's level"
+version = "0.5.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cadscribe/egui-screencast"
+
+[features]
+default = ["playback", "ui"]
+# The narration played by rodio (cpal: CoreAudio, WASAPI, ALSA, so a Linux
+# build needs libasound2-dev) and a downloaded bundle's AAC decoded by
+# symphonia. Without it the voice says it cannot play.
+playback = ["dep:rodio", "dep:symphonia"]
+# The voice's row in the lesson pane and its settings rows, drawn with
+# opencad-ui's widgets. Without it: the voice itself, keys, caches, queue.
+ui = []
+
+# Same rules as the recorder: every external dependency pinned exactly
+# (`=x.y.z`), published at least 7 days before it was added. The versions
+# are OpenSolve's (ADR 0062 there), so that its lock file does not change.
+[dependencies]
+# egui at the version eframe 0.37.0 brings in; the app's features apply.
+egui = { version = "=0.37.0", default-features = false }
+# The language state shared with the app (`Lang`, `lang()`), the message
+# tables and the widgets of the voice's row: OpenCAD's UI foundation, at the
+# tag the apps pin (the same copy, or the pane speaks another language).
+opencad-ui = { git = "https://github.com/cadscribe/opencad-ui", tag = "v0.1.2" }
+serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
+# A voices folder's voices.yaml (S2 Pro's references).
+serde_yaml = "=0.9.33"
+# A section's text as keyed: its delivery tags gone, as the recorder's.
+regex = "=1.13.1"
+# SHA-256: the sections' keys, a reference clip's hash, a bundle's checksum.
+ring = "=0.17.14"
+# A course's voice downloaded as a bundle: HTTPS by minreq (rustls with the
+# system's trust store), unpacked by tar.
+minreq = { version = "=3.0.0", features = ["https-rustls-probe"] }
+tar = "=0.4.46"
+rodio = { version = "=0.23.0", default-features = false, features = ["playback"], optional = true }
+symphonia = { version = "=0.5.5", default-features = false, features = ["aac", "isomp4"], optional = true }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+float_cmp = "warn"

@@ -1,11 +1,16 @@
 [package]
 name = "egui-screencast"
 description = "Tutorials played and recorded by an egui app itself: a plan of clicks, keys and the app's own actions, a hand-like pointer, pictures and a video's frames, with or without a window"
-version = "0.4.4"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/cadscribe/egui-screencast"
+
+# The recorder is the root package; the lessons (courses, their voice) are
+# `lessons/`, released with it under one version and one tag.
+[workspace]
+members = [".", "lessons"]
 
 # Same rules as OpenSolve, OpenCAD and OpenSketch: every external
 # dependency is pinned exactly (`=x.y.z`) and was published at least 7 days

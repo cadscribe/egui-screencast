@@ -1,0 +1,1046 @@
+{
+ "reference": "RIFF egui-lessons fixture reference",
+ "transcript": "A fixture's  transcript,\n with\tits spaces.",
+ "sections": [
+  {
+   "text": "Extrude the sketch by ten millimeters.",
+   "untagged": "Extrude the sketch by ten millimeters.",
+   "fish": {
+    "None": "5e5b2a09415d488f8a023082",
+    "English": "5e5b2a09415d488f8a023082",
+    "German": "c358537cdf2a2e86c86495d6"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "20d93639527a67ef"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "1c89063d1825f4bd"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "f8ab5357b93adf1a"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "d03a59263bc173cc"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "7bf884561cd1c601"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "5668f0f4fc518fd696b99349"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "0c2ea5451d36950bd7ed0f63"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "d5fe65dfc3c6cec6eb4f6409"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "726d58bd11845a3c0c593a49"
+    }
+   ]
+  },
+  {
+   "text": "Say [pause] it, [excited] then go on.",
+   "untagged": "Say it, then go on.",
+   "fish": {
+    "None": "50fc01c851ec7cacb44c845a",
+    "English": "50fc01c851ec7cacb44c845a",
+    "German": "e13c1082b5a5a20fd368a11e"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "5ffa5bb0d97788c5"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "01a0ac2265afa961"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "2a126cfbc90828cf"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "f416bba63e4b26c3"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "7ce3f032cc048051"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "c88a1059c0487fa98b886cac"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "f8f89d657eaa806ecba13967"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "32f1875bda2592f21d285806"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "55eef848a029b2465d500393"
+    }
+   ]
+  },
+  {
+   "text": "A [tag [nested] one] and a lone [ bracket.",
+   "untagged": "A [tag one] and a lone [ bracket.",
+   "fish": {
+    "None": "cfa8ca379bb1ffdbbc359e4a",
+    "English": "cfa8ca379bb1ffdbbc359e4a",
+    "German": "3aaccee4882dbcb635a2b655"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "f8502ff0edae9663"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "e490a2c98e081120"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "ba75211271f52500"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "84f42d6689425d03"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "d3e0d0972f9dfc17"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "251e5ff556f446ab2f77368b"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "9722232a929f8e8635398bd4"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "9c75b89285c3c9603fcafc31"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "73b906a3593e22d36dbd40c9"
+    }
+   ]
+  },
+  {
+   "text": "He said \"quoted\" and a back\\slash.",
+   "untagged": "He said \"quoted\" and a back\\slash.",
+   "fish": {
+    "None": "377eb1b57c2def57cbabb49a",
+    "English": "377eb1b57c2def57cbabb49a",
+    "German": "827b3287fea0517a6b80bb9c"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "5078dcba6ecd9fcc"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "9dc37c431f6f4c75"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "a456690a7884e171"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "5bf221beac894553"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "48c180afd361728c"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "3206266909e1571b0f380f01"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "f1451c1e25e84f4b253f5ac2"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "60df64b09b16c17b7176f43d"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "b73e3cbb92cf9d85a32915ea"
+    }
+   ]
+  },
+  {
+   "text": "Tabs\tand\nnew lines\r\nand  double  spaces.",
+   "untagged": "Tabs and new lines and double spaces.",
+   "fish": {
+    "None": "4d6c50df3d0e58e637f2484a",
+    "English": "4d6c50df3d0e58e637f2484a",
+    "German": "bf37e263131cc21f385e278c"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "0d38698c013cd85e"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "b756807eed53c596"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "395bbef68090abed"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "e43ab7f5ed21a346"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "8207861cbbfeb90f"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "221b99a5d8e784339f6fc1a5"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "6257898f2a0e941d2532aff3"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "f58eab7925934c67306358ae"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "2aa10d51c8f3f7fabaa9c8ae"
+    }
+   ]
+  },
+  {
+   "text": "Control \u0001 and \u001c separators \u001f here.",
+   "untagged": "Control \u0001 and separators here.",
+   "fish": {
+    "None": "6d48433a11d68eb37821082e",
+    "English": "6d48433a11d68eb37821082e",
+    "German": "597ba9abec1be8569704c45a"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "234bda58bedf4257"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "cdfd46386877bd44"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "716c894531b0f6a4"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "df55ca8b9cc307ba"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "6577ba8be0868757"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "513325d7f9f91bcbba72db04"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "2572eb0943282dffec5dd6f4"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "e8a64aca7c32b472588a1333"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "62b515ce29bd6cf7b4c91edb"
+    }
+   ]
+  },
+  {
+   "text": "Non breaking, ideographic　space, line separator.",
+   "untagged": "Non breaking, ideographic space, line separator.",
+   "fish": {
+    "None": "bbffe35737cd97fcd0fa7fc8",
+    "English": "bbffe35737cd97fcd0fa7fc8",
+    "German": "33aceb36db0cc3a906bee56b"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "f313b4a3679ddca5"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "d3f3e60c2775ad65"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "9328acdf284dcb0b"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "bcbdac849ba1ec23"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "05c95d240d02d637"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "a2ee28308f78dced7910f3d7"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "8ffa7c7991cd59f0282c5569"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "0c65f016a89b282b34fe3e63"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "7ab1aa498d621690f64f46f5"
+    }
+   ]
+  },
+  {
+   "text": "Zero​width stays.",
+   "untagged": "Zero​width stays.",
+   "fish": {
+    "None": "80d7d51f741168aeed43fce8",
+    "English": "80d7d51f741168aeed43fce8",
+    "German": "4030783e9d5883b4f2377064"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "f9a332b82af0a23d"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "f3f8f0b1ce1d55e5"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "110b43fcdab0e21a"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "7acea5abacfaebf8"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "88617ffbe1571e4d"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "56865388976d9dae1084dfc9"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "b86e2d0476185a19f95c9a67"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "6e9af78f782a27995702ecbb"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "b0eb660b305a5c172b489fa5"
+    }
+   ]
+  },
+  {
+   "text": "Ümlaute, ß und „Anführungszeichen“ — mit Gedankenstrich.",
+   "untagged": "Ümlaute, ß und „Anführungszeichen“ — mit Gedankenstrich.",
+   "fish": {
+    "None": "e79a75a9fe0f36837bd7abe4",
+    "English": "e79a75a9fe0f36837bd7abe4",
+    "German": "e305a5943f483b7381cf6237"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "045ea96fc6f48521"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "de6eb017d5b2a9d6"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "3db8013659e81453"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "46908bdbd684fee0"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "cc28f99ffb120ded"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "86993fc8c802e295468692cd"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "decc6bd590273067680afae5"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "26894882f4d3c1278d6ca8f5"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "ab787b948c5026741f908923"
+    }
+   ]
+  },
+  {
+   "text": "Emoji 🙂 and math ∑ × → ›.",
+   "untagged": "Emoji 🙂 and math ∑ × → ›.",
+   "fish": {
+    "None": "e0ee01d0332503b494698d31",
+    "English": "e0ee01d0332503b494698d31",
+    "German": "a66f3ad1956f6db5b0f91eda"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "f6615f1f3142c9d3"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "b3a0026c9ab94695"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "19965d858eab0c97"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "bce2770e479fde39"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "a4ff4498d39c4ecb"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "b6a7adec37b3d85225b79e48"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "e41b42a593193beccd588858"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "ba3c39835e95ad647d32d403"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "c5414220b3d8108d6ef95f41"
+    }
+   ]
+  },
+  {
+   "text": "  leading and trailing  ",
+   "untagged": "leading and trailing",
+   "fish": {
+    "None": "a2f84f9b1f15076205b61fa4",
+    "English": "a2f84f9b1f15076205b61fa4",
+    "German": "534d8038054c8f2e9221907e"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "e8997dc904a280c9"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "d0e567f449584ec4"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "9f0605faaf6b99d3"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "700bfeac466c8454"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "87d9371ed4295851"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "0019fcd690c8402fb2c47f53"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "5adff0d8d642156588f497fa"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "411001d117b45ba792b9836e"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "4049a8591e5df3791c080dad"
+    }
+   ]
+  },
+  {
+   "text": "[pause]",
+   "untagged": "",
+   "fish": {
+    "None": "d9139bdc2a6de40818a68afe",
+    "English": "d9139bdc2a6de40818a68afe",
+    "German": "7bee2c1351aa268e224eec74"
+   },
+   "fish_language": {
+    "None": null,
+    "English": null,
+    "German": "German"
+   },
+   "kokoro": [
+    {
+     "voice": "am_michael",
+     "speed": 1.0,
+     "key": "994ee92dbe7c0693"
+    },
+    {
+     "voice": "bf_emma",
+     "speed": 1.1,
+     "key": "a70daf9bf6aadb27"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 0.95,
+     "key": "6478368ac882d214"
+    },
+    {
+     "voice": "af_heart",
+     "speed": 1.25,
+     "key": "9659ac970ba2e54e"
+    },
+    {
+     "voice": "am_michael",
+     "speed": 2.0,
+     "key": "f073cd1257228553"
+    }
+   ],
+   "elevenlabs": [
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": null,
+     "speed": 1.0,
+     "settings": {},
+     "language": null,
+     "key": "c4679cef79f1a3132e9c0c1d"
+    },
+    {
+     "voice": "HzBCRGsOskP44taMg2CT",
+     "model": "eleven_v3",
+     "speed": 1.0,
+     "settings": {},
+     "language": "de",
+     "key": "0ca5a5f5266d408b9ea78d62"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": null,
+     "speed": 1.1,
+     "settings": {
+      "stability": 0.4,
+      "style": 1
+     },
+     "language": null,
+     "key": "0d659aec2e556fcb6976c0a6"
+    },
+    {
+     "voice": "abcDEF123",
+     "model": "eleven_multilingual_v2",
+     "speed": 0.9,
+     "settings": {
+      "use_speaker_boost": false,
+      "extra": "x"
+     },
+     "language": "en",
+     "key": "25f654798a993188e40aacfa"
+    }
+   ]
+  }
+ ],
+ "languages": [
+  {
+   "choice": null,
+   "script": null,
+   "lang": "en",
+   "code": null
+  },
+  {
+   "choice": "de",
+   "script": null,
+   "lang": "en",
+   "code": "de"
+  },
+  {
+   "choice": null,
+   "script": "de",
+   "lang": "en",
+   "code": "de"
+  },
+  {
+   "choice": "auto",
+   "script": null,
+   "lang": "de",
+   "code": "de"
+  },
+  {
+   "choice": "AUTO",
+   "script": "en",
+   "lang": "en",
+   "code": "en"
+  },
+  {
+   "choice": "off",
+   "script": "de",
+   "lang": "de",
+   "code": null
+  },
+  {
+   "choice": "none",
+   "script": null,
+   "lang": "de",
+   "code": null
+  },
+  {
+   "choice": null,
+   "script": "German",
+   "lang": "en",
+   "code": "de"
+  },
+  {
+   "choice": "EN",
+   "script": null,
+   "lang": "de",
+   "code": "en"
+  },
+  {
+   "choice": "fra",
+   "script": null,
+   "lang": "de",
+   "code": "fra"
+  },
+  {
+   "choice": " de ",
+   "script": null,
+   "lang": "en",
+   "code": "de"
+  }
+ ]
+}

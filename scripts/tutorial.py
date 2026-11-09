@@ -17,8 +17,10 @@ script, for each tutorial named:
    `--play plan.json --record dir --headless`: the app plays the steps
    without a window, drawn at 1920 × 1080 on the GPU, and takes its pictures
    itself (its `egui_screencast::Player`);
-4. copies the pictures to `<tutorials>/<name>/images/` and writes
-   `<tutorials>/<name>/README.md` (`README.de.md` in German);
+4. copies the pictures to `<tutorials>/<name>/images/` (`images.de/` in
+   German when the app speaks it too, `--ui-languages en,de`) and writes
+   `<tutorials>/<name>/README.md` (`README.de.md` in German, linking its
+   own pictures);
 5. unless `--no-video`, makes `<tutorials>/<name>/<name>.mp4` with ffmpeg
    (`<name>.de.mp4` in German):
    the frames, the narration under them and the text as subtitles.
@@ -30,7 +32,8 @@ script, for each tutorial named:
         [--voice-setting K=V]…
         [--voice-cache DIR] [--dry-run] [--prune-voice-cache DAYS]
         [--app-name NAME] [--voice-intro TEXT | --no-voice-intro]
-        [--lang en|de|en,de] [--fast] [--engine E] [--voices DIR] [--fish-python PY]
+        [--lang en|de|en,de] [--ui-languages en,de] [--fast] [--engine E]
+        [--voices DIR] [--fish-python PY]
         [--remix] [--out DIR] [--pronunciations DIR]
 
 What is said and what is seen go together: an action `cue: "Open it"`
@@ -42,7 +45,9 @@ step's end. The subtitles are the words spoken, when they are spoken. The
 voice is said to be synthetic on the cards, in a corner of the video, on
 the page and in the video's metadata (`voice_notice` in another language).
 
-In an `--app-arg` or `--env`, `{lang}` is the run's language. In an
+The plan says the run's language (`"lang": "de"`), so that the app can
+play it in that language. In an `--app-arg` or `--env`, `{lang}` is the
+run's language. In an
 `--app-arg`, `{work}` is the tutorial's work folder (an app's own
 settings folder, say). Paths are taken from the folder it is run in. Without
 names, every tutorial is built. Work files are kept in `<work>/<name>/`.
@@ -179,6 +184,10 @@ VOICE_MODEL: str | None = None
 # `auto` the run's `--lang`, `off` none. None and no script's: none, so
 # that the sections cached without one keep their keys.
 VOICE_LANGUAGE: str | None = None
+# The languages the app's window speaks (`--ui-languages en,de`): a run in
+# one of them other than English takes its pictures into `images.<lang>/`.
+# A script's own `ui_languages` wins.
+UI_LANGUAGES: list[str] = []
 VOICE_SETTINGS: dict = {}
 VOICE_CACHE = WORK / "voices"
 # What the voice says first, over the first step's card: that it is an AI
@@ -1125,7 +1134,7 @@ def plan(name: str, script: dict, audio, video: bool, voice: bool, speaker: dict
             if card.get("logo"):
                 card["logo"] = str((ROOT / card["logo"]).resolve())
             steps[-1]["card"] = card
-    the_plan = {"fps": FPS, "video": video, "shot_width": SHOT_WIDTH, "steps": steps}
+    the_plan = {"fps": FPS, "video": video, "shot_width": SHOT_WIDTH, "lang": LANG, "steps": steps}
     if voice:
         the_plan["caption"] = voice_notice(script, speaker)
     return the_plan
@@ -1161,9 +1170,13 @@ def play(name: str, the_plan: dict) -> dict:
 
 
 def images_dir(script: dict) -> str:
-    """The pictures' folder: `images`, or `images.de` for a script whose app
-    is in that language too (`ui_languages: [en, de]`)."""
-    return f"images{suffix()}" if LANG in (script.get("ui_languages") or []) and LANG != "en" else "images"
+    """The pictures' folder: `images`, or `images.de` where the app is in
+    that language too: the script's `ui_languages: [en, de]`, else the
+    run's `--ui-languages en,de`."""
+    ui = script.get("ui_languages")
+    if ui is None:
+        ui = UI_LANGUAGES
+    return f"images{suffix()}" if LANG in (ui or []) and LANG != "en" else "images"
 
 
 def copy_shots(name: str, the_plan: dict, script: dict | None = None) -> None:
@@ -1574,6 +1587,9 @@ def main() -> None:
     p.add_argument("--no-voice-intro", action="store_true", help="the voice does not say first that it is AI")
     p.add_argument("--lang", default="en", help="the language(s) of the narration and the page: en, de or en,de "
                    "(German: <name>.de.mp4, README.de.md)")
+    p.add_argument("--ui-languages", default="", metavar="en,de",
+                   help="the languages the app's window speaks: a German run's pictures go to images.de/ and its "
+                   "page links them (a script's ui_languages: wins); else every run's go to images/")
     p.add_argument("--fast", action="store_true", help="Kokoro instead of Fish Audio S2 Pro: fast, English only")
     p.add_argument("--remix", action="store_true",
                    help="the narration, subtitles and video again from <work>/<name>/recording and the cached "
@@ -1584,7 +1600,7 @@ def main() -> None:
                    "beside the script)")
     a = p.parse_args()
     global WINDOW, DOCS, WORK, APP, APP_ARGS, APP_ENV, VOICE, VOICE_MODEL, VOICE_LANGUAGE, VOICE_SETTINGS, VOICE_CACHE
-    global APP_NAME, VOICE_INTRO, FISH_PYTHON, VOICES, ENGINE, FAST, REMIX, OUT, PRONUNCIATIONS
+    global APP_NAME, VOICE_INTRO, FISH_PYTHON, VOICES, ENGINE, FAST, REMIX, OUT, PRONUNCIATIONS, UI_LANGUAGES
     WINDOW = a.window
     DOCS = (ROOT / a.tutorials).resolve()
     WORK = (ROOT / a.work).resolve()
@@ -1616,6 +1632,10 @@ def main() -> None:
     for lang in langs:
         if lang not in LANGS:
             fail(f"--lang {lang}: one of {', '.join(LANGS)}")
+    UI_LANGUAGES = [x.strip() for x in a.ui_languages.split(",") if x.strip()]
+    for lang in UI_LANGUAGES:
+        if lang not in LANGS:
+            fail(f"--ui-languages {lang}: one of {', '.join(LANGS)}")
     if a.prune_voice_cache is not None:
         removed, size = elevenlabs.Cache(VOICE_CACHE).prune(a.prune_voice_cache)
         print(f"{VOICE_CACHE}: {removed} entries removed, {size / 1e6:.1f} MB")
